@@ -1,0 +1,102 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu May 12 15:02:39 2016
+
+@author: mike
+"""
+
+import unittest
+
+import fake_data
+from utils import common_funcs, cutoff_funcs, data_funcs
+from numpy import arange, diff, array, percentile
+import pandas
+from pandas.util import testing as ptest
+import pdb
+
+class TestCutoff(unittest.TestCase):
+    def setUp(self):
+        pass
+    
+    def test_finite_horizon_rejective_cutoffs_ON_DRUGS_WITH_RATE(self):
+        # Read in drug reaction rates (combine amnesia with non amnesia)
+        dar, dnar, _ = data_funcs.read_drug_data()
+        drr_raw = dar + dnar
+        # Screen rare drugs and drugs with no amnesia SE
+        drug_mask = array( (drr_raw > 1) & (dar > 0) )
+        drr = drr_raw[drug_mask]
+        # Set up null and alt hypotheses: prop of reactions that were amenesia
+        # reactions
+        p0 = .002
+        p1 = .004
+        alpha_levels = array([.01, .05, .10])
+        n_periods = 1000
+        k_reps = 100
+        cutoff_est, data_rec = cutoff_funcs.finite_horizon_rejective_cutoffs(
+            drr, p0, p1, alpha_levels, n_periods, k_reps, dbg=True)
+        data_rec = array(data_rec)
+        print sum(data_rec.var(0) == 0.0)
+        
+        
+    def test_calculate_mult_sprt_cutoffs(self):
+        alpha = .1
+        beta = .2
+        rho = .583
+        N_drugs = 20
+        alpha_vec_raw = alpha * arange(1, 1+N_drugs) / float(N_drugs)
+        beta_vec_raw = beta * arange(1, 1+N_drugs) / float(N_drugs)
+        # Normal FDR and FNR
+        scaled_alpha_vec = cutoff_funcs.create_fdr_controlled_alpha(alpha, alpha_vec_raw)
+        scaled_beta_vec = cutoff_funcs.create_fdr_controlled_alpha(beta, beta_vec_raw)
+        A_vec, B_vec = cutoff_funcs.calculate_mult_sprt_cutoffs(scaled_alpha_vec, scaled_beta_vec, rho)
+        print "A: ", A_vec[:5], all(diff(A_vec) > 0)
+        print "B: ", B_vec[:5], all(diff(B_vec) < 0)
+    
+    def test_est_sample_size(self):
+        alpha = .1
+        beta = .2
+        N_drugs = 5
+        drr = pandas.Series({"ab":1.0, "cd":1.0, "ef":2.0, "gh":3.0, "ij":5.0})
+        cutoff_funcs.est_sample_size(alpha, beta, drr, .55, .50)
+        pass
+    
+    def test_llr_term_moments(self):
+        drr = pandas.Series({"ab":1.0, "cd":1.0, "ef":2.0, "gh":3.0, "ij":5.0})
+        p0 = .055        
+        p1 = .05
+        cutoff_funcs.llr_term_moments(drr, p0, p1)
+
+class TestData(unittest.TestCase):
+    def setUp(self):
+        pass    
+    
+    # TODO: implement test
+    def test_read_drug_data(self):
+        dar, dnar, meta_data = data_funcs.read_drug_data()
+        
+    # TODO: implement tests with real and dummy data
+    def test_simulate_reactions(self):
+        dar, dnar, meta_data = data_funcs.read_drug_data()
+        am_reacts, nonam_reacts = data_funcs.simulate_reactions(dar, dnar, 5)
+    
+    # TODO: implement tests with real and dummy data                                         
+    def test_assemble_llr(self):
+        dar, dnar, meta_data = data_funcs.read_drug_data()
+        am_reacts, nonam_reacts = data_funcs.simulate_reactions(dar, dnar, 5)
+        p0 = data_funcs.whole_data_p0(*meta_data)
+        p1 = data_funcs.whole_data_p1(*meta_data, p0=p0, n_se=2.0)
+        llr_paths = data_funcs.assemble_llr(am_reacts, nonam_reacts, p0, p1)
+        
+    # TODO: implement tests with real and dummy data
+    def test_prescreen_abs(self):
+        prescreen_func = data_funcs.prescreen_abs(min_am_reacts=1, 
+                                                  min_total_reacts=5)
+        dar, dnar, meta_data = data_funcs.read_drug_data(prescreen_func)
+        # look at metadata?
+        
+        
+
+
+
+if __name__ == '__main__':
+    unittest.main()
