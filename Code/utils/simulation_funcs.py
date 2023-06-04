@@ -1,5 +1,11 @@
-# -*- coding: utf-8 -*-
-#from pylab import *
+"""Simulation functions for MultSeq.
+
+This module contains functions for simulating data for sequential testing 
+of multiple hypotheses, and executing those procedures on it.
+
+Functions:
+    simfunc: Simulates a single path of a MultSPRT procedure.
+"""
 from numpy import arange, diff, zeros, mod, ones, log
 import numpy
 import pandas
@@ -8,21 +14,19 @@ import multseq
 import visualizations
 import string
 from tqdm import tqdm
-from .common_funcs import chunk_mc
+from . import common_funcs
 from .cutoff_funcs import (finite_horizon_rejective_cutoffs, 
                                 create_fdr_controlled_alpha, fdr_helper,
                                 infinite_horizon_MC_cutoffs,
                                 create_fdr_controlled_bl_alpha_indpt)
-from .data_funcs import (read_drug_data, simulate_reactions, assemble_drug_llr, 
-                              simulate_correlated_reactions, 
-                              assemble_fake_drugs, assemble_fake_binom,
-                              assemble_fake_pois, assemble_fake_pois_grad,
-                              assemble_fake_gaussian, generate_llr)
+from .data_funcs import (simulate_reactions, assemble_drug_llr, 
+                         assemble_fake_drugs, assemble_fake_binom,
+                         assemble_fake_pois, assemble_fake_pois_grad,
+                         assemble_fake_gaussian, generate_llr)
 from . import data_funcs, cutoff_funcs
-import time, os
+import time
 import logging, traceback
 import multiprocessing 
-import itertools
 import traceback
 import warnings
 
@@ -30,32 +34,32 @@ import warnings
 # fh = logging.FileHandler(os.path.expanduser('~/Dropbox/Research/MultSeq/MainLog.txt'))
 # fh.setLevel(logging.DEBUG)
 
-def simfunc(dar, dnar, n_periods, p0, p1, A_B, n_reps, job_id, **kwargs):  
+def simfunc(positive_event_rate, negative_event_rate, n_periods, p0, p1, A_B, n_reps:int, job_id: int, **kwargs):  
     out_rec = []
     if job_id==0:
-        for i in tqdm(range(n_reps), desc="Job 0: MC full path simulations"):
-            amnesia, nonamnesia = simulate_reactions(dar, 
-             dnar, 
-             n_periods)
-            llr = assemble_drug_llr((amnesia, nonamnesia), p0, p1)
-            del amnesia
-            del nonamnesia
-            tout = multseq.modular_sprt_test(llr, A_B[0], A_B[1], record_interval=100, 
-             stepup=False, verbose=False, rejective=A_B[1] is None)
-            del llr
-            out_rec.append(tout[0]['drugTerminationData']["ar0"])
+        rep_iter = tqdm(range(n_reps), desc="Job 0: MC full path simulations")
     else:
-        for i in range(n_reps):
-            amnesia, nonamnesia = simulate_reactions(dar, 
-             dnar, 
-             n_periods)
-            llr = assemble_drug_llr((amnesia, nonamnesia), p0, p1)
-            del amnesia
-            del nonamnesia
-            tout = multseq.modular_sprt_test(llr, A_B[0], A_B[1], record_interval=100, 
-             stepup=False, verbose=False, rejective=A_B[1] is None)
-            del llr
-            out_rec.append(tout[0]['drugTerminationData']["ar0"])
+        rep_iter = range(n_reps)
+
+    for _ in rep_iter:
+        positive_events, negative_events = simulate_reactions(
+            positive_event_rate, 
+            negative_event_rate, 
+            n_periods,
+            )
+        llr = assemble_drug_llr((positive_events, negative_events), p0, p1)
+        del positive_events
+        del negative_events
+        tout = multseq.modular_sprt_test(
+            llr, 
+            A_B[0], 
+            A_B[1], 
+            record_interval=100, 
+            stepup=False, 
+            verbose=False, 
+            rejective=A_B[1] is None)
+        del llr
+        out_rec.append(tout[0]['drugTerminationData']["ar0"])
     return out_rec
     
 def simfunc_wrapper(kwargs):
@@ -392,7 +396,7 @@ def real_data_wrapper(alpha, beta, n_periods=None, cut_type="BL", sim_reps=100,
              do_viz=False, hyp_type="drug", rej_hist=True, m0_known=False, 
              m_null = 0, max_magnitude = None, interleaved=False, 
              divide_cores=divide_cores, cummax=cummax)
-import pdb
+
 def synth_data_sim(alpha=.1, beta=None, cut_type="BL", record_interval=100, 
                    p0 = .05, p1 = .045,
              n_periods = None, m_null = 3, max_magnitude = 10.0,
@@ -509,7 +513,7 @@ def synth_data_sim(alpha=.1, beta=None, cut_type="BL", record_interval=100,
                     num_jobs = 1 
                     
             pool = multiprocessing.Pool(num_cpus)
-            n_rep_list = chunk_mc(sim_reps, num_jobs)         
+            n_rep_list = common_funcs.chunk_mc(sim_reps, num_jobs)         
             rs = pool.map_async(synth_simfunc_wrapper, [{"dar":dar, "dnar":dnar, 
                                     "n_periods":n_periods, "p0":p0, "p1":p1, 
                                     "A_B":[A_vec, B_vec], "n_reps":n_rep, 

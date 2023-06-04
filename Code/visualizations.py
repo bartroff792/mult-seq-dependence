@@ -7,6 +7,7 @@ Created on Thu Jul  7 23:08:56 2016
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from matplotlib import pyplot as plt
 from bokeh.plotting import figure as bokeh_figure
 from bokeh.plotting import ColumnDataSource
 from bokeh.models import HoverTool
@@ -160,7 +161,7 @@ def plot_multseq_llr(llr, A_vec, B_vec, ground_truth=None, title=None, verbose=T
     fake_drug_outcomes, _ = multseq.modular_sprt_test(llr, A_vec, B_vec, rejective=rejective, verbose=verbose, stepup=stepup)
     if stat_data_func is not None:
         llr = stat_data_func()
-    fig = figure(figsize=(12,8))
+    fig = plt.figure(figsize=(12,8))
 
     # DF with row for each drug, specifying its outcome (ar0),
     # the step at which it was accepted or rejected (NaN if neither),
@@ -184,14 +185,14 @@ def plot_multseq_llr(llr, A_vec, B_vec, ground_truth=None, title=None, verbose=T
     for drug_name, drug_term_data in drugTerminationData.iterrows(): 
         end_step = drug_term_data['step']
 
-        if isnan(end_step):
+        if np.isnan(end_step):
             end_step = n_periods
         else:
             end_step = int(end_step) + 1
 
-        if not isnan(drug_term_data['rejLevel']):
+        if not np.isnan(drug_term_data['rejLevel']):
             drug_label = "{0} (rej at {1})".format(drug_name, end_step )
-        elif not isnan(drug_term_data['accLevel']):
+        elif not np.isnan(drug_term_data['accLevel']):
             drug_label = "{0} (acc at {1})".format(drug_name, end_step)
         else:
             drug_label = "{0}".format(drug_name)
@@ -204,23 +205,23 @@ def plot_multseq_llr(llr, A_vec, B_vec, ground_truth=None, title=None, verbose=T
         raw_jitter = jitter_mag * randn(end_step)
         raw_jitter[0] = 0
         if not skip_main_plot:
-            plot(llr[drug_name][:end_step] + raw_jitter.cumsum(), label=drug_label,
+            plt.plot(llr[drug_name][:end_step] + raw_jitter.cumsum(), label=drug_label,
                  color=color)
     
         # Show post termination data
         if ghost_lines:
-            plot(llr[drug_name][(end_step-1):], linestyle='dotted', alpha=.8,
+            plt.plot(llr[drug_name][(end_step-1):], linestyle='dotted', alpha=.8,
                  color=color)
         y_final = llr[drug_name][end_step-1]
         shift_length = max([.5, n_periods/10])
         if do_annotation:
-            annotate(drug_label, (end_step-1, y_final), 
-                 xytext=(end_step + shift_length - 1, (.8 + .4 * rand()) * y_final), arrowprops=dict(facecolor='black', shrink=0.2,), 
+            plt.annotate(drug_label, (end_step-1, y_final), 
+                 xytext=(end_step + shift_length - 1, (.8 + .4 * np.random.rand()) * y_final), arrowprops=dict(facecolor='black', shrink=0.2,), 
                  fontsize=label_fontsize)
         # update guess at relevant y bounds
-        if min(llr[drug_name][:end_step]) < best_bounds[0]:
+        if np.min(llr[drug_name][:end_step]) < best_bounds[0]:
             best_bounds[0] = min(llr[drug_name][:end_step])
-        if max(llr[drug_name][:end_step]) > best_bounds[1]:
+        if np.max(llr[drug_name][:end_step]) > best_bounds[1]:
             best_bounds[1] = max(llr[drug_name][:end_step])
             
         
@@ -230,16 +231,16 @@ def plot_multseq_llr(llr, A_vec, B_vec, ground_truth=None, title=None, verbose=T
         
     for j, A_val in enumerate(A_vec):
         max_step = fake_drug_outcomes['levelTripData']['rej'][j]
-        hlines(A_val, xmin=0, xmax=max_step, linestyles='dashed')
-        annotate("A" + str(j+1), (max_step, A_val), fontsize=16)
+        plt.hlines(A_val, xmin=0, xmax=max_step, linestyles='dashed')
+        plt.annotate("A" + str(j+1), (max_step, A_val), fontsize=16)
         
     if not rejective:        
         for j, B_val in enumerate(B_vec):
             max_step = fake_drug_outcomes['levelTripData']['acc'][j]
-            hlines(B_val, xmin=0, xmax=max_step, linestyles='dashed')
-            annotate("B" + str(j+1), (max_step, B_val), fontsize=16)
+            plt.hlines(B_val, xmin=0, xmax=max_step, linestyles='dashed')
+            plt.annotate("B" + str(j+1), (max_step, B_val), fontsize=16)
 
-    ylim(1.2 * best_bounds[0], 1.2 * best_bounds[1])            
+    plt.ylim(1.2 * best_bounds[0], 1.2 * best_bounds[1])            
     # legend(loc='upper center', bbox_to_anchor=(0.5, 1.25),
     #           ncol=4, fancybox=True, shadow=True)
     if ground_truth is not None and add_metrics:
@@ -255,10 +256,10 @@ def plot_multseq_llr(llr, A_vec, B_vec, ground_truth=None, title=None, verbose=T
     #cutoffs.T.to_csv('/media/mike/joint/Dropbox/Research/MultSeq/Data/SyntheticpFDRCutoffs.csv', float_format="%.4e")
     
 def demo_paths(ugly=True, stepup=False, label_fontsize=18, title_fontsize=24):
-    llr = pandas.DataFrame({'Hyp1':array([0.0, 2.5, 3.5, 17.0, -30, 12]), 
-                    'Hyp2':array([0.0, 2.5, 1.5, -1.5, 1.5, 2.5]),
-                    'Hyp3':array([0.0, 0.5, -0.5, -1.5, -2.5, -1.5]),
-                    'Hyp4':array([0.0, 0.2, -0.2, 0.0, 0.2, -0.2])})
+    llr = pd.DataFrame({'Hyp1':np.array([0.0, 2.5, 3.5, 17.0, -30, 12]), 
+                    'Hyp2':np.array([0.0, 2.5, 1.5, -1.5, 1.5, 2.5]),
+                    'Hyp3':np.array([0.0, 0.5, -0.5, -1.5, -2.5, -1.5]),
+                    'Hyp4':np.array([0.0, 0.2, -0.2, 0.0, 0.2, -0.2])})
     if not ugly:
         llr["Hyp3"][5] = -4.0
         llr["Hyp2"][1] = .85
@@ -270,6 +271,7 @@ def demo_paths(ugly=True, stepup=False, label_fontsize=18, title_fontsize=24):
     
     
 def grad_color_func(poisrate, lam0, lam1):
+    """Colors the point according to the gradient between the two rates."""
     if poisrate < lam0:
         return "blue"
     elif poisrate > lam1:

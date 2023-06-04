@@ -277,7 +277,7 @@ def modular_sprt_test(llr, A_vec, B_vec, record_interval=100, stepup=False,
 
 
 
-def naive_barrier_trips(data_ser: NDArray[float], cutoff_vec: NDArray[float], num_eliminated:int, highlow: HighLow) -> NDArray[np.bool_]:
+def naive_barrier_trips(data_ser: NDArray[np.float32], cutoff_vec: NDArray[np.float32], num_eliminated:int, highlow: HighLow) -> NDArray[np.bool_]:
     """Returns a boolean vector indicating whether or not the jth most 
     significant active statistic tripped the jth active barrier. """
 #    print(data_ser[:, None])
@@ -296,7 +296,7 @@ def naive_barrier_trips(data_ser: NDArray[float], cutoff_vec: NDArray[float], nu
     return naive_barrier_tripped
     
 # %% step up and step down tests
-def step_up_elimination(data_ser: pd.Series, cutoff_vec: NDArray[float], num_eliminated: int, highlow: HighLow="high") -> (List[Any], int):
+def step_up_elimination(data_ser: pd.Series, cutoff_vec: NDArray[np.float32], num_eliminated: int, highlow: HighLow="high") -> (List[Any], int):
     """Runs a rejection or acceptance phase of a sequential stepdown procedure.
     
     Args:

@@ -9,7 +9,7 @@ Created on Thu Oct 27 12:12:55 2016
 # %% Arg imports
 import argparse, argcomplete, os
 # Parallelization
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(description='Run simulations')
 parser.add_argument('--singlecore', action='store_true', help="Dont parallelize main sims")
 parser.add_argument('--skipdrugs', action='store_true', help="skip drugs sims and load data")
 #parser.add_argument('--skipsynth', action='store_true', help="skip synthetic sims and load data")
@@ -33,17 +33,14 @@ if cmd_args.usesect:
 
 
 # %% Main imports
-from pylab import *
+import numpy as np
     
-import multseq, visualizations
-from utils import cutoff_funcs, data_funcs, common_funcs, simulation_funcs
+import visualizations
+from utils import data_funcs,  simulation_funcs
 
 from IPython.display import display
-import itertools
 import pandas
 import shelve
-import sys
-import numpy
 from contextlib import closing
 from configparser import ConfigParser
 
@@ -55,6 +52,7 @@ logger.setLevel(logging.DEBUG)
 # %% Reload after code changes
 
 class TqdmLoggingHandler (logging.Handler):
+    """Logging handler that emit messages friendly to tqdm progress bars"""
     def __init__ (self, level = logging.NOTSET):
         super (self.__class__, self).__init__ (level)
 
