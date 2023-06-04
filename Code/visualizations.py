@@ -4,13 +4,8 @@ Created on Thu Jul  7 23:08:56 2016
 
 @author: mike
 """
-from pylab import *
-from nose.tools import *
-import numpy
-import pandas
-import string, re
-import pickle, os
-import datetime, calendar
+import numpy as np
+import pandas as pd
 import seaborn as sns
 from bokeh.plotting import figure as bokeh_figure
 from bokeh.plotting import ColumnDataSource
@@ -98,52 +93,52 @@ def bokeh_add_scatter(p, source_rec, x_col, y_col, color_col=None, legend=None,
     return p
     
     
-def visualize_raw_drug_data_distribution():
-    # Examine relationship between report length and number of reactions
-    # Appears to be a mixture
+# def visualize_raw_drug_data_distribution():
+#     # Examine relationship between report length and number of reactions
+#     # Appears to be a mixture
 
-    scl = cl.scales['9']['seq']['Blues']
-    colorscale = [ [ float(i)/float(len(scl)-1), scl[i] ] for i in range(len(scl)) ]
-    colorscale
+#     scl = cl.scales['9']['seq']['Blues']
+#     colorscale = [ [ float(i)/float(len(scl)-1), scl[i] ] for i in range(len(scl)) ]
+#     colorscale
 
-    df = pandas.DataFrame({'daterange': date_range_col, 'reacts': log10(reacts_df[total_reacts_cname])})
-    df.head()
+#     df = pandas.DataFrame({'daterange': date_range_col, 'reacts': log10(reacts_df[total_reacts_cname])})
+#     df.head()
 
-    data = [
-        go.Histogram2dContour(
-            x=df['daterange'], # assign x as the dataframe column 'x'
-            y=df['reacts'],
-            colorscale=colorscale,
-            #line=py.Line(width=0)
-        )
-    ]
+#     data = [
+#         go.Histogram2dContour(
+#             x=df['daterange'], # assign x as the dataframe column 'x'
+#             y=df['reacts'],
+#             colorscale=colorscale,
+#             #line=py.Line(width=0)
+#         )
+#     ]
 
-    axis_template = dict(
-        ticks='',
-        showgrid=False,
-        zeroline=False,
-        showline=True,
-        mirror=True,
-        linewidth=2,
-        linecolor='#444',
-    )
+#     axis_template = dict(
+#         ticks='',
+#         showgrid=False,
+#         zeroline=False,
+#         showline=True,
+#         mirror=True,
+#         linewidth=2,
+#         linecolor='#444',
+#     )
 
-    xaxis = axis_template.copy()
-    xaxis['title'] = 'Years'
-    yaxis = axis_template.copy()
-    yaxis['title'] = 'Log 10 Total Reactions'
-    layout=go.Layout(xaxis=xaxis,
-                     yaxis=yaxis,
-                     width=700,
-                     height=750,
-                     autosize=False,
-                     hovermode='closest',
-                     title='Log Total Reactions vs Report Length')
+#     xaxis = axis_template.copy()
+#     xaxis['title'] = 'Years'
+#     yaxis = axis_template.copy()
+#     yaxis['title'] = 'Log 10 Total Reactions'
+#     layout=go.Layout(xaxis=xaxis,
+#                      yaxis=yaxis,
+#                      width=700,
+#                      height=750,
+#                      autosize=False,
+#                      hovermode='closest',
+#                      title='Log Total Reactions vs Report Length')
 
-    fig = go.Figure(data=data, layout=layout)
+#     fig = go.Figure(data=data, layout=layout)
 
-    # IPython notebook
-    py.iplot(fig, filename='num_reacts_vs_report_length_full', height=750)
+#     # IPython notebook
+#     py.iplot(fig, filename='num_reacts_vs_report_length_full', height=750)
     
     
 def plot_multseq_llr(llr, A_vec, B_vec, ground_truth=None, title=None, verbose=True,

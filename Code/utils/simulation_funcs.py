@@ -26,8 +26,9 @@ import itertools
 import traceback
 import warnings
 
-fh = logging.FileHandler(os.path.expanduser('~/Dropbox/Research/MultSeq/MainLog.txt'))
-fh.setLevel(logging.DEBUG)
+# TODO: fix whatever nonsense this is.
+# fh = logging.FileHandler(os.path.expanduser('~/Dropbox/Research/MultSeq/MainLog.txt'))
+# fh.setLevel(logging.DEBUG)
 
 def simfunc(dar, dnar, n_periods, p0, p1, A_B, n_reps, job_id, **kwargs):  
     out_rec = []
