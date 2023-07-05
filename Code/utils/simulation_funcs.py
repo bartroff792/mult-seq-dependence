@@ -4,11 +4,21 @@ This module contains functions for simulating data for sequential testing
 of multiple hypotheses, and executing those procedures on it.
 
 Functions:
-    simfunc: Simulates a single path of a MultSPRT procedure.
+    simfunc: Simulates and runs MultSPRT procedures.
+    simfunc_wrapper: Wrapper for simfunc to allow parallelization; takes a 
+        single dictionary as an argument
+    synth_simfunc: DIFF?
+    synth_simfunc_wrapper: DIFF?
+    calc_sim_cutoffs:
+    real_data_wrapper:
+    synth_data_sim:
+    compute_fdp:
 """
+from typing import Tuple, List, Dict, Union, Optional
 from numpy import arange, diff, zeros, mod, ones, log
 import numpy
-import pandas
+import numpy as np
+import pandas as pd
 import seaborn as sns
 import multseq
 import visualizations
@@ -19,8 +29,8 @@ from .cutoff_funcs import (finite_horizon_rejective_cutoffs,
                                 create_fdr_controlled_alpha, fdr_helper,
                                 infinite_horizon_MC_cutoffs,
                                 create_fdr_controlled_bl_alpha_indpt)
-from .data_funcs import (simulate_reactions, assemble_drug_llr, 
-                         assemble_fake_drugs, assemble_fake_binom,
+from . import data_funcs
+from .data_funcs import (assemble_fake_drugs, assemble_fake_binom,
                          assemble_fake_pois, assemble_fake_pois_grad,
                          assemble_fake_gaussian, generate_llr)
 from . import data_funcs, cutoff_funcs
@@ -29,25 +39,51 @@ import logging, traceback
 import multiprocessing 
 import traceback
 import warnings
+# import xarray as xr
 
 # TODO: fix whatever nonsense this is.
 # fh = logging.FileHandler(os.path.expanduser('~/Dropbox/Research/MultSeq/MainLog.txt'))
 # fh.setLevel(logging.DEBUG)
 
-def simfunc(positive_event_rate, negative_event_rate, n_periods, p0, p1, A_B, n_reps:int, job_id: int, **kwargs):  
-    out_rec = []
+def simfunc(positive_event_rate: pd.Series, 
+            negative_event_rate: pd.Series, 
+            n_periods:int, 
+            p0:float, 
+            p1:float, 
+            A_B:Tuple[np.ndarray, np.ndarray], 
+            n_reps:int, job_id: int, **kwargs) -> List[pd.Series]:
+    """Simulates and runs MultSPRT procedures.
+    
+    Args:
+        positive_event_rate: (pd.Series) Relevant event rate for each drug.
+        negative_event_rate: (pd.Series) Non-relevant event rate for each drug.
+        n_periods: (int) Number of periods to simulate.
+        p0: (float) Prior probability of the null hypothesis.
+        p1: (float) Prior probability of the alternative hypothesis.
+        A_B: (Tuple[np.ndarray, np.ndarray]) Cutoffs for accept/reject.
+        n_reps: (int) Number of replications to run.
+        job_id: (int) Job ID for parallelization.
+        **kwargs: (dict) Additional arguments to pass to multseq.modular_sprt_test.
+    Returns:
+        accept_reject_step_ser_list: (List[pd.Series]) List of accept/reject steps for each drug.
+    """
+    # Allocate list to collect series of accept/reject steps for each drug at each stage.
+    accept_reject_step_ser_list = []
+    # If job_id is 0, use tqdm to show progress bar, otherwise just iterate.
     if job_id==0:
         rep_iter = tqdm(range(n_reps), desc="Job 0: MC full path simulations")
     else:
         rep_iter = range(n_reps)
 
     for _ in rep_iter:
-        positive_events, negative_events = simulate_reactions(
+        # {positive, negative}_events are DataFrames with drug names as columns
+        # and periods as rows.
+        positive_events, negative_events = data_funcs.simulate_reactions(
             positive_event_rate, 
             negative_event_rate, 
             n_periods,
             )
-        llr = assemble_drug_llr((positive_events, negative_events), p0, p1)
+        llr = data_funcs.assemble_drug_llr((positive_events, negative_events), p0, p1)
         del positive_events
         del negative_events
         tout = multseq.modular_sprt_test(
@@ -59,10 +95,12 @@ def simfunc(positive_event_rate, negative_event_rate, n_periods, p0, p1, A_B, n_
             verbose=False, 
             rejective=A_B[1] is None)
         del llr
-        out_rec.append(tout[0]['drugTerminationData']["ar0"])
-    return out_rec
+        detailed_output = tout[0]
+        drug_termination_df = detailed_output["hypTerminationOutput"]
+        accept_reject_step_ser_list.append(drug_termination_df["ar0"])
+    return accept_reject_step_ser_list
     
-def simfunc_wrapper(kwargs):
+def simfunc_wrapper(kwargs: Dict[str, Any]) -> List[pd.Series]:
     try:
         numpy.random.seed(kwargs['job_id'])
         return simfunc(**kwargs)
@@ -178,9 +216,25 @@ def simfunc_wrapper(kwargs):
         
 
 
-def synth_simfunc(dar, dnar, n_periods, p0, p1, A_B, n_reps, job_id, rho, 
-                  rej_hist, ground_truth, hyp_type=None, stepup=False, 
-                  m1=None, rho1=None, rand_order=False, cummax=False, **kwargs): 
+def synth_simfunc(dar: pd.Series, 
+                  dnar: pd.Series, 
+                  n_periods: int, 
+                  p0:float, 
+                  p1:float, 
+                  A_B: Tuple[np.ndarray, np.ndarray],
+                  n_reps:int, 
+                  job_id:int, 
+                  rho:float, 
+                  rej_hist: bool, 
+                  ground_truth, 
+                  hyp_type=None, 
+                  stepup=False, 
+                  m1=None, 
+                  rho1=None, 
+                  rand_order=False, 
+                  cummax=False, 
+                  **kwargs,
+                  ): 
     rejective=A_B[1] is None
     if job_id==0:
         main_iter = tqdm(range(n_reps), desc="MC full path simulations")
@@ -588,7 +642,7 @@ def synth_data_sim(alpha=.1, beta=None, cut_type="BL", record_interval=100,
         else:
             return multseq.modular_sprt_test(llr, A_vec, B_vec, record_interval=100, stepup=stepup, rejective=True), llr
         
-def compute_fdp(dtd, ground_truth):
+def compute_fdp(dtd: pd.DataFrame, ground_truth: pd.Series) -> Tuple[float, float, int, int]:
     """Computes FDP and FNP of testing procedure output.
     
     args:

@@ -25,18 +25,21 @@ def gen_names(n_hyps):
 
 TOTAL_AMNESIA_CNAME = "Total All"
 TOTAL_REACTS_CNAME = "total_reactions"
-DATA_FILE_PATH = os.path.expanduser('~/Dropbox/Research/MultSeq/Data/YellowcardData.csv')
+DATA_FILE_PATH = os.path.expanduser('../../Data/YellowcardData.csv')
 
 def gen_skew_prescreen(min_am=1, min_tot=20, aug_am=1, aug_non=1):
     """Generates a drug prescreening function to be passed to read_drug_data."""
     def skew_prescreen(reacts_df, am_col, tot_col):
+        # Select only drugs that have either min_am amnesia reports or min_tot total side effect reports.
         screened_df = reacts_df[(reacts_df[am_col]>min_am) | (reacts_df[tot_col]>min_tot)].copy()
+        # Calculate the amnesia rate for each drug (augmenting by aug_am)
         screened_df[TOTAL_AMNESIA_CNAME] = screened_df[TOTAL_AMNESIA_CNAME] + aug_am
+        # Calculate the total side effects rate for each drug (augmenting by aug_non + aug_am)
         screened_df[TOTAL_REACTS_CNAME] = screened_df[TOTAL_REACTS_CNAME] + aug_am + aug_non
         return screened_df
     return skew_prescreen
 
-def read_drug_data(prescreen=None, aug=1):
+def read_drug_data(path: str, prescreen=None, aug=1):
     """Read drug reaction rates and some metadata from file.
     """
     # sum total days over all drugs, divide total reports by that 
@@ -44,7 +47,7 @@ def read_drug_data(prescreen=None, aug=1):
     # can't be formulated as sprt.... look at bartroff's???
     
 
-    reacts_df = pandas.read_csv(DATA_FILE_PATH, index_col=0, 
+    reacts_df = pandas.read_csv(path, index_col=0, 
                                 parse_dates=["end_date","start_date", "first_react"])
 
     # Here either exclude drugs without first report date or fill in report start date

@@ -14,7 +14,7 @@ The main functions are:
 
 
 """
-from typing import Any, List, Literal, Union
+from typing import Any, Dict, List, Literal, Tuple, Union
 from numpy.typing import NDArray
 import numpy as np
 import pandas as pd
@@ -106,8 +106,13 @@ def RejAccOtherFunc(hyp_term_data):
             
 # %% Asynchronous SPRT
 
-def modular_sprt_test(llr, A_vec, B_vec, record_interval=100, stepup=False, 
-                      rejective=False, verbose=True):
+def modular_sprt_test(llr: pd.DataFrame, 
+                      A_vec:np.ndarray, 
+                      B_vec:np.ndarray, 
+                      record_interval:int=100, 
+                      stepup:bool=False, 
+                      rejective:bool=False, 
+                      verbose:bool=True) -> Tuple[Dict[str,Any], pd.DataFrame, pd.DataFrame]:
     """
     Args:
         llr (pd.DataFrame): Columns are hypotheses to be tested, rows are time steps,
@@ -267,7 +272,7 @@ def modular_sprt_test(llr, A_vec, B_vec, record_interval=100, stepup=False,
     fine_grained_outcomes = {'remaining':list(llr.columns), 
                              'accepted':llr_accepted, 
                              'rejected':llr_rejected, 
-              'drugTerminationData':termination_level, 
+            #   'drugTerminationData':termination_level, 
               'hypTerminationData':termination_level, 
               'levelTripData':pd.DataFrame({'acc':acc_level_term, 'rej':rej_level_term})}
     termination_time_series =  pd.DataFrame(
