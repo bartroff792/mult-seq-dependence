@@ -12,7 +12,8 @@ Functions:
     calc_sim_cutoffs:
     real_data_wrapper:
     synth_data_sim:
-    compute_fdp:
+    compute_fdp: Computes FDP and FNP of testing procedure output for a run 
+        where ground truth is known.
 """
 from typing import Tuple, List, Dict, Union, Optional
 from numpy import arange, diff, zeros, mod, ones, log
@@ -26,7 +27,7 @@ import string
 from tqdm import tqdm
 from . import common_funcs
 from .cutoff_funcs import (finite_horizon_rejective_cutoffs, 
-                                create_fdr_controlled_alpha, fdr_helper,
+                                create_fdr_controlled_alpha, guo_rao_stepdown_fdr_level,
                                 infinite_horizon_MC_cutoffs,
                                 create_fdr_controlled_bl_alpha_indpt)
 from . import data_funcs
@@ -186,10 +187,10 @@ def simfunc_wrapper(kwargs: Dict[str, Any]) -> List[pd.Series]:
 #                time.sleep(max((sleep_time, sim_reps / (15 * num_jobs))))
 #            par_out = list(itertools.chain.from_iterable(rs.get()))
 #            logging.info("par_out   {0}".format(par_out))
-#            out_rec = pandas.DataFrame(par_out).reset_index(drop=True)
+#            out_rec = pd.DataFrame(par_out).reset_index(drop=True)
 #            return out_rec
 #        else:
-#            out_rec = pandas.DataFrame(0, index=dar.index, 
+#            out_rec = pd.DataFrame(0, index=dar.index, 
 #                                   columns=["ar0_" + str(u) for u in arange(sim_reps)],
 #                                    dtype="object")
 #
@@ -249,8 +250,6 @@ def synth_simfunc(dar: pd.Series,
         rej_rec = []
         step_rec = []
         for i in main_iter:
-#            llr = generate_llr(dar, dnar, n_periods, rho, hyp_type, p0, p1, 
-#                               m1, rho1, rand_order=rand_order, cummax=cummax)
             if rejective:
                 llr_data = generate_llr(dar, dnar, n_periods, rho, hyp_type, p0, p1, 
                                m1, rho1, rand_order=rand_order, cummax=cummax)
@@ -268,9 +267,9 @@ def synth_simfunc(dar: pd.Series,
             rej_rec.append(tout[0]['drugTerminationData']["ar0"])
             step_rec.append(tout[0]['drugTerminationData']["step"])
             
-        return (pandas.DataFrame(rej_rec).reset_index(drop=True), pandas.DataFrame(step_rec).reset_index(drop=True))
+        return (pd.DataFrame(rej_rec).reset_index(drop=True), pd.DataFrame(step_rec).reset_index(drop=True))
     else:
-        fdp_rec = pandas.DataFrame(zeros((n_reps, 4)), columns=["fdp", "fnp", "tot_rej", "tot_acc"])
+        fdp_rec = pd.DataFrame(zeros((n_reps, 4)), columns=["fdp", "fnp", "tot_rej", "tot_acc"])
         for i in main_iter:
 #            llr = generate_llr(dar, dnar, n_periods, rho, hyp_type, p0, p1, 
 #                               m1, rho1, rand_order=rand_order, cummax=cummax)
@@ -332,7 +331,7 @@ def calc_sim_cutoffs(drr, alpha, beta=None, scale_fdr=True, cut_type="BL",
             scaled_alpha_vec = alpha_vec_raw / log(m_hyps)
         else:
             if m0_known:
-                scaled_alpha_vec = alpha * alpha_vec_raw / cutoff_funcs.fdr_helper(alpha_vec_raw, m_total)
+                scaled_alpha_vec = alpha * alpha_vec_raw / cutoff_funcs.guo_rao_stepdown_fdr_level(alpha_vec_raw, m_total)
             else:
                 scaled_alpha_vec = cutoff_funcs.create_fdr_controlled_alpha(alpha, alpha_vec_raw)
     else: 
@@ -347,7 +346,7 @@ def calc_sim_cutoffs(drr, alpha, beta=None, scale_fdr=True, cut_type="BL",
                 scaled_beta_vec = beta_vec_raw / log(m_hyps)
             else:
                 if m0_known:
-                    scaled_beta_vec = beta * beta_vec_raw / cutoff_funcs.fdr_helper(beta_vec_raw, m_total)
+                    scaled_beta_vec = beta * beta_vec_raw / cutoff_funcs.guo_rao_stepdown_fdr_level(beta_vec_raw, m_total)
                 else:
                     scaled_beta_vec = cutoff_funcs.create_fdr_controlled_alpha(beta, beta_vec_raw)
         else: 
@@ -500,18 +499,18 @@ def synth_data_sim(alpha=.1, beta=None, cut_type="BL", record_interval=100,
             drr = dar + dnar
         elif hyp_type == "binom":
             dar, ground_truth = assemble_fake_binom(m_null, interleaved, p0, p1, m_alt=m_alt)
-            drr = pandas.Series(ones(len(dar)), index=dar.index)
+            drr = pd.Series(ones(len(dar)), index=dar.index)
             dnar = None
         elif hyp_type == "pois":
             dar, ground_truth = assemble_fake_pois(m_null, interleaved, p0, p1, m_alt=m_alt)
-            drr = pandas.Series(ones(len(dar)), index=dar.index)
+            drr = pd.Series(ones(len(dar)), index=dar.index)
             dnar = None
         elif hyp_type == "gaussian":
             dar, dnar, ground_truth = assemble_fake_gaussian(max_magnitude, m_null, p0, p1, m_alt=m_alt)
             drr = dnar
         elif hyp_type == "pois_grad":
             dar = assemble_fake_pois_grad(m_null, p0, p1, m_alt=m_alt)
-            drr = pandas.Series(ones(len(dar)), index=dar.index)
+            drr = pd.Series(ones(len(dar)), index=dar.index)
             dnar = None
             ground_truth = drr.astype(bool)
             hyp_type = "pois"
@@ -588,11 +587,11 @@ def synth_data_sim(alpha=.1, beta=None, cut_type="BL", record_interval=100,
             
             if rej_hist:
                 uu, vv = zip(*rs.get())
-                return (pandas.concat(uu).reset_index(drop=True), 
-                        pandas.concat(vv).reset_index(drop=True),
+                return (pd.concat(uu).reset_index(drop=True), 
+                        pd.concat(vv).reset_index(drop=True),
                         ground_truth)
             else:
-                return pandas.concat(rs.get()).reset_index(drop=True)
+                return pd.concat(rs.get()).reset_index(drop=True)
                 
         else:
             arg_dict = {"dar":dar, "dnar":dnar, "n_periods":n_periods, "p0":p0, 
@@ -617,9 +616,9 @@ def synth_data_sim(alpha=.1, beta=None, cut_type="BL", record_interval=100,
 #                rej_rec.append(tout[0]['drugTerminationData']["ar0"])
 #                step_rec.append(tout[0]['drugTerminationData']["step"])
 #                
-#            return (pandas.DataFrame(rej_rec).reset_index(drop=True), pandas.DataFrame(step_rec).reset_index(drop=True))
+#            return (pd.DataFrame(rej_rec).reset_index(drop=True), pd.DataFrame(step_rec).reset_index(drop=True))
 #        else:
-#            fdp_rec = pandas.DataFrame(zeros((sim_reps, 4)), columns=["fdp", "fnp", "tot_rej", "tot_acc"])
+#            fdp_rec = pd.DataFrame(zeros((sim_reps, 4)), columns=["fdp", "fnp", "tot_rej", "tot_acc"])
 #            for i in tqdm(range(sim_reps), desc="MC full path simulations"):
 #                amnesia, nonamnesia = simulate_correlated_reactions(dar, dnar, n_periods, rho)
 #                llr = assemble_llr(amnesia, nonamnesia, p0, p1)

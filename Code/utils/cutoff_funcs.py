@@ -1,27 +1,47 @@
 """Functions for calculating cutoffs for significance tests.
+TODO: explain the basic scheme of alpha vetors, raw alpha vectors, llr 
+cutoffs, and their signs and orders
 
 List of all functions in this module with one line descriptions:
-* fdr_helper: Returns FDR bound for a given set of alphas and the number of true nulls.
-* fdr_scaling_func: Returns a constanst lambda such that using cutoffs (alpha_i*lambda, ... ) control fdr at fdr_level
-* create_fdr_controlled_alpha: Returns a vector of alpha cutoffs that control FDR at the given level.
-* create_fdr_controlled_bh_alpha: Get FDR controlled alpha cutoffs for the Benjamini-Hochberg stepup procedure
-* create_fdr_controlled_bh_alpha_indpt: Get FDR controlled alpha cutoffs for the Benjamini-Hochberg stepup procedure w/independence.
-* create_fdr_controlled_bl_alpha: Get FDR controlled alpha cutoffs for the Benjamini-Liu stepdown procedure
-* create_fdr_controlled_bl_alpha_indpt: Get FDR controlled alpha cutoffs for the Benjamini-Liu stepdown procedure w/independence.
-* calc_bh_alpha_and_cuts: Caclulates llr alpha and beta and cutoffs for BH procedure
-* cutoff_truncation: sketchy functions that maps negative cutoffs small positive values... not sure if this is a good idea.
-* calculate_mult_sprt_cutoffs:
-* get_pvalue_cutoffs:
-* pfdr_pfnr_cutoffs:
+* guo_rao_stepdown_fdr_level: Returns FDR bound (by Guo+Rao) for a stepdown 
+    procedure using the provided set of alphas and (optionally) the number of
+    true nulls.
+* guo_rao_scaling: Returns a constanst lambda such that using cutoffs 
+    (alpha_i*lambda, ... ) control fdr at fdr_level
+* create_fdr_controlled_alpha: Returns a vector of alpha cutoffs that control
+     FDR at the given level.
+* create_fdr_controlled_bh_alpha: Get FDR controlled alpha cutoffs for the 
+    Benjamini-Hochberg stepup procedure
+* create_fdr_controlled_bh_alpha_indpt: Get FDR controlled alpha cutoffs for 
+    the Benjamini-Hochberg stepup procedure w/independence.
+* create_fdr_controlled_bl_alpha: Get FDR controlled alpha cutoffs for the 
+    Benjamini-Liu stepdown procedure
+* create_fdr_controlled_bl_alpha_indpt: Get FDR controlled alpha cutoffs 
+    for the Benjamini-Liu stepdown procedure w/independence.
+* calc_bh_alpha_and_cuts: Caclulates llr alpha and beta and cutoffs for 
+    BH procedure
+* cutoff_truncation: sketchy functions that maps negative cutoffs small 
+    positive values... not sure if this is a good idea.
+* calculate_mult_sprt_cutoffs: Uses Wald approx to calculate llr cutoffs from
+    type 1 and 2 error thresholds
+* get_pvalue_cutoffs: Inverts Wald approx to get type 1/2 error cutoffs from 
+    llr cutoffs.
+* pfdr_pfnr_cutoffs: broken? write a unit test
 * finite_sim_func:
 * finite_sim_func_wrapper:
 * empirical_quant_presim_wrapper:
-* finite_horizon_rejective_cutoffs: Calculate finite horizon rejective cutoffs from alpha levels using MC for drug sim.
-* infinite_horizon_MC_cutoffs: Calculate finite horizon rejective cutoffs from alpha levels using MC for drug sim.
-* llr_term_moments: Expectation of the llr terms for a drug sim  under the null hypothesis for each step.
-* llr_binom_term_moments: Calculates mean and variance of single-example binomial llr terms.
-* llr_pois_term_moments: Calculates mean and variance of one step for a poisson llr.
-* est_sample_size: Estimate the sample size needed to accept or reject all hypotheses
+* finite_horizon_rejective_cutoffs: Calculate finite horizon rejective cutoffs 
+    from alpha levels using MC for drug sim.
+* infinite_horizon_MC_cutoffs: Calculate finite horizon rejective cutoffs from 
+    alpha levels using MC for drug sim.
+* llr_term_moments: Expectation of the llr terms for a drug sim  under the null
+    hypothesis for each step.
+* llr_binom_term_moments: Calculates mean and variance of single-example 
+    binomial llr terms.
+* llr_pois_term_moments: Calculates mean and variance of one step for a poisson
+    llr.
+* est_sample_size: Estimate the sample size needed to accept or reject all 
+    hypotheses
 
 """
 from typing import Any, Dict, List, Literal, Optional, Tuple
@@ -39,6 +59,7 @@ import logging
 import traceback
 import itertools
 import traceback
+import copy
 from scipy.stats import norm as gaussian
 
 # FDR controlled pvalue cutoffs and related functions
@@ -46,13 +67,14 @@ FloatArray = NDArray[np.float32]
 HypTypes = Literal["drug", "pois", "binom"]
 
 
-def fdr_helper(
+def guo_rao_stepdown_fdr_level(
     alpha_vec: FloatArray, 
-    m0: int = None, 
+    m0: Optional[int] = None, 
     get_max_m0: bool = False,
 ) -> float:
     """Returns FDR bound for a given set of alphas and the number of true nulls.
 
+    Guo-Rao based FDR control level for a stepdown prodedure.
     Assumes alpha_vec[0] = alpha_1 <= alpha_vec[1] = alpha_2 <= alpha_vec[m-1] = alpha_m
     Args:
         alpha_vec: increasing array of p-value/significance cutoffs
@@ -74,7 +96,7 @@ def fdr_helper(
     # When number of true nulls is unknown, search over all possible values.
     if m0 is None:
         fdr_vec = [
-            fdr_helper(alpha_vec, m0, False) for m0 in range(1, len(alpha_vec) + 1)
+            guo_rao_stepdown_fdr_level(alpha_vec, m0, False) for m0 in range(1, len(alpha_vec) + 1)
         ]
         if get_max_m0:
             return np.max(fdr_vec), np.argmax(fdr_vec)
@@ -107,7 +129,7 @@ def fdr_helper(
     return m0 * (term1 + term2)
 
 
-def fdr_scaling_func(fdr_level, alpha_vec):
+def guo_rao_scaling(fdr_level, alpha_vec):
     """
     Returns a constanst lambda such that using cutoffs (alpha_i*lambda, ... ) control fdr at fdr_level
 
@@ -118,11 +140,11 @@ def fdr_scaling_func(fdr_level, alpha_vec):
         A scaling factor which, when multiplied by alpha_vec, will return a
         proportional cutoff vector that controls alpha at the correct level.
     """
-    return fdr_level / fdr_helper(alpha_vec)
+    return fdr_level / guo_rao_stepdown_fdr_level(alpha_vec)
 
 
 def create_fdr_controlled_alpha(fdr_level, alpha_vec):
-    return fdr_scaling_func(fdr_level, alpha_vec) * alpha_vec
+    return guo_rao_scaling(fdr_level, alpha_vec) * alpha_vec
 
 
 def create_fdr_controlled_bh_alpha_indpt(fdr_level, m_hyps):
@@ -289,23 +311,61 @@ def get_pvalue_cutoffs(A_vec, B_vec, rho=0.583):
 
 
 # TODO: fix this. calculating for reversed statistics
-def pfdr_pfnr_cutoffs(alpha_raw_vec, beta_raw_vec, pfdr, pfnr, m0, epsilon=10.0**-8):
+def pfdr_pfnr_cutoffs(alpha_raw_vec: np.ndarray, 
+                      beta_raw_vec: np.ndarray, 
+                      pfdr: float, 
+                      pfnr:float, 
+                      m0:int, 
+                      epsilon:float=10.0**-8,
+                      ) -> Tuple[np.ndarray, np.ndarray]:
+    """pFDR and pFNR controlled pvalue cutoffs for infinite horizon sequential stepdown.
+    
+    Uses an interative scheme to find pvalue cutoffs that satisfy the pfdr and
+    pfnr levels that utilize the same vector structure as the raw inputs.
+    See the section of the readme titled "THM: pFDR and pFNR Control for In􏰅nite Horizon"
+
+    Args:
+        alpha_raw_vec (np.ndarray): raw vector of rejective p-value cutoffs. 
+            only the structure will be used, as a linear scaling will be applied.
+        beta_raw_vec (np.ndarray): raw vector of acceptive p-value cutoffs. 
+            only the structure will be used, as a linear scaling will be applied.
+        pfdr (float): desired pFDR control level
+        pfnr (float): desired pFNR control level
+        m0 (Optional[int]): number of true nulls, if known
+        epsilon (float, optional): tolerance for convergence. Defaults to 10.0**-8.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: final alpha vector and beta vector.
+    """
+    # Total number of hypotheses
     m = len(alpha_raw_vec)
-    m1 = m - m0
+    # number of false hypotheses
+    if m0 is None:
+        m1 = None
+    else:
+        m1 = m - m0
+    # Raw alpha and beta vectors
     alpha_vec0 = alpha_raw_vec
     beta_vec0 = beta_raw_vec
-    pfdrx = fdr_helper(alpha_vec0, m0) / (1 - beta_vec0[-1])
-    pfnrx = fdr_helper(beta_vec0, m1) / (1 - alpha_vec0[-1])
+    # Get pFDR and pFNR control levels using current alpha and beta vectors
+    # by first calculating FDR and FNR levels (via Guo+Rao) then scaling those
+    # by the (approximate) probability of at least one rejection (or acceptance)
+    pfdrx = guo_rao_stepdown_fdr_level(alpha_vec0, m0) / (1 - beta_vec0[-1])
+    pfnrx = guo_rao_stepdown_fdr_level(beta_vec0, m1) / (1 - alpha_vec0[-1])
+    # Now scale the vectors to ensure control
     alpha_vec1 = pfdr * alpha_vec0 / pfdrx
     beta_vec1 = pfnr * beta_vec0 / pfnrx
+    # However this adjusts the denominators of the scaling factors pfdrx and 
+    # pfnrx, meaning the bound may not hold. Repeat this procedure until 
+    # convergence.
     while (
         max(abs(alpha_vec1 - alpha_vec0)) > epsilon
         or max(abs(beta_vec1 - beta_vec0)) > epsilon
     ):
-        alpha_vec0 = alpha_vec1[:]
-        beta_vec0 = beta_vec1[:]
-        pfdrx = fdr_helper(alpha_vec0, m0) / (1 - beta_vec0[-1])
-        pfnrx = fdr_helper(beta_vec0, m1) / (1 - alpha_vec0[-1])
+        alpha_vec0 = copy.copy(alpha_vec1)
+        beta_vec0 = copy.copy(beta_vec1)
+        pfdrx = guo_rao_stepdown_fdr_level(alpha_vec0, m0) / (1 - beta_vec0[-1])
+        pfnrx = guo_rao_stepdown_fdr_level(beta_vec0, m1) / (1 - alpha_vec0[-1])
         alpha_vec1 = pfdr * alpha_vec0 / pfdrx
         beta_vec1 = pfnr * beta_vec0 / pfnrx
         logging.debug(
@@ -705,29 +765,32 @@ def finite_horizon_rejective_cutoffs(
 
 
 def infinite_horizon_MC_cutoffs(
-    rate_data,
-    p0,
-    p1,
-    alpha_levels,
-    beta_levels,
-    n_periods,
-    k_reps,
-    pair_iters=10,
-    hyp_type=None,
-    dbg=False,
-):
+    rate_data: pd.Series,
+    p0: float,
+    p1: float,
+    alpha_levels: np.ndarray,
+    beta_levels: np.ndarray,
+    n_periods: int,
+    k_reps: int,
+    pair_iters:int=10,
+    hyp_type: Optional[str]=None,
+    dbg: bool=False,
+) -> np.ndarray:
     """Calculate finite horizon rejective cutoffs from alpha levels using MC for drug sims.
 
     Number of simulations should exceed the inverse of the min diff of the
     alpha vector, otherwise you might end up with the same cutoff values for
     multiple levels.
+    Does not depend on step up or step down, as the condition for which the cutoffs
+    are calculated depends only on the test statistic exceeding a threshold.
+
     args:
         rate_data: vector of emission rates
         p0: null p
         p1: alt p
         alpha_levels: type 1 levels for which cutoffs should be calculated
         n_periods: finite horizon
-        k_reps: number of MC sims for
+        k_reps: number of MC sims to run
     return:
         array of cutoff values which should be > 0
 
