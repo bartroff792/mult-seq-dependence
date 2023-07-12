@@ -2,26 +2,33 @@
 TODO: explain the basic scheme of alpha vetors, raw alpha vectors, llr 
 cutoffs, and their signs and orders
 
+In general, you can assume that the llr cutoffs will take the form
+A[0] > ... A[m-1] > 0 > B[0] > ... > B[m-1]
+and that the alpha vectors will take the form
+0 < alpha[0] < ... alpha[m-1] < 1
+0 < beta[0] < ... beta[m-1] < 1
+
+
 List of all functions in this module with one line descriptions:
 * FDR values and FDR controlled pvalue adjustments
-    * guo_rao_stepdown_fdr_level: Returns FDR bound (by Guo+Rao) for a stepdown 
-        procedure using the provided set of alphas and (optionally) the number of
-        true nulls.
+    * guo_rao_stepdown_fdr_level: Returns stepdown FDR bound for an alpha 
+        vector under arbitrary joint.
     * guo_rao_scaling: Returns a constanst lambda such that using cutoffs 
         (alpha_i*lambda, ... ) control fdr at fdr_level
-    * create_fdr_controlled_alpha: Returns a vector of alpha cutoffs that control
-        FDR at the given level.
-    * create_fdr_controlled_bh_alpha: Get FDR controlled alpha cutoffs for the 
-        Benjamini-Hochberg stepup procedure
-    * create_fdr_controlled_bh_alpha_indpt: Get FDR controlled alpha cutoffs for 
-        the Benjamini-Hochberg stepup procedure w/independence.
+    * create_fdr_controlled_alpha: Scales an alpha vector such that it 
+        controls FDR for a stepdown procedure.
+    * create_fdr_controlled_bh_alpha_indpt: Creates alpha vector that 
+        controls FDR for stepup under independence, with BH shape.
+    * create_fdr_controlled_bh_alpha: Build alpha vector that controls FDR
+        for stepdown with arbitrary joint but has BH (stepup) shape.
+    * create_fdr_controlled_bl_alpha_inpdt: Get FDR controlled alpha cutoffs for the 
+        Benjamini-Liu stepdown procedure under independence.
     * create_fdr_controlled_bl_alpha: Get FDR controlled alpha cutoffs for the 
         Benjamini-Liu stepdown procedure
-    * create_fdr_controlled_bl_alpha_indpt: Get FDR controlled alpha cutoffs 
-        for the Benjamini-Liu stepdown procedure w/independence.
-* LLR cutoffs
-    * calc_bh_alpha_and_cuts: Caclulates llr alpha and beta and cutoffs for 
-        BH procedure
+    * calc_bh_alpha_and_cuts: Caclulates llr alpha and beta and cutoffs for
+        sequential stepdown with BH shape alpha and beta vector.
+    * calc_bl_alpha_and_cuts: Caclulates llr alpha and beta and cutoffs for
+        sequential stepdown with BL shape alpha and beta vector.
     * cutoff_truncation: sketchy functions that maps negative cutoffs small 
         positive values... not sure if this is a good idea.
     * calculate_mult_sprt_cutoffs: Uses Wald approx to calculate llr cutoffs from
@@ -76,7 +83,7 @@ def guo_rao_stepdown_fdr_level(
     m0: Optional[int] = None, 
     get_max_m0: bool = False,
 ) -> float:
-    """Returns FDR bound for a given set of alphas and the number of true nulls.
+    """Returns stepdown FDR bound for an alpha vector under arbitrary joint.
 
     Guo-Rao based FDR control level for a stepdown prodedure.
     Assumes alpha_vec[0] = alpha_1 <= alpha_vec[1] = alpha_2 <= alpha_vec[m-1] = alpha_m
@@ -147,26 +154,73 @@ def guo_rao_scaling(fdr_level, alpha_vec):
     return fdr_level / guo_rao_stepdown_fdr_level(alpha_vec)
 
 
-def create_fdr_controlled_alpha(fdr_level, alpha_vec):
+def create_fdr_controlled_alpha(fdr_level:float, alpha_vec:FloatArray) -> FloatArray:
+    """Scales an alpha vector such that it controls FDR for a stepdown procedure.
+    
+    Does not require independence.
+    
+    Args:
+        fdr_level: level at which FDR must be controlled for stepdown procedures.
+        alpha_vec: initial, unscaled vector of increasing alpha cutoffs.
+        
+    Returns:
+        A vector of alpha cutoffs that control FDR at fdr_level for stepdown procedures.
+    """
     return guo_rao_scaling(fdr_level, alpha_vec) * alpha_vec
 
 
-def create_fdr_controlled_bh_alpha_indpt(fdr_level, m_hyps):
+def create_fdr_controlled_bh_alpha_indpt(fdr_level:float, m_hyps:int) -> FloatArray:
+    """Creates alpha vector that controls FDR for stepup under independence.
+
+    For a stepup procedure with independent hypotheses, the alpha cutoffs
+    alpha_{i} = fdr_level * i / m_hyps
+    will control FDR at fdr_level.
+
+    This vector can, however, be scaled using Guo Rao to control FDR for a stepdown procedure.
+
+    Args:
+        fdr_level: level at which FDR must be controlled for a stepup procedure under independence. 
+            Not directly relevant otherwise.
+        m_hyps: number of hypotheses.
+    
+    Returns:
+        A vector of alpha cutoffs that control FDR at fdr_level.
+    """
     return fdr_level * np.arange(1, m_hyps + 1, dtype=float) / float(m_hyps)
 
 
-def create_fdr_controlled_bh_alpha(fdr_level, m_hyps):
+def create_fdr_controlled_bh_alpha(fdr_level:float, m_hyps:int) -> FloatArray:
+    """Build alpha vector that controls FDR for stepdown with arbitrary joint but has BH (stepup) shape.
+    
+    Ratio of alpha_{i} / alpha_{j} = i / j for all i, j.
+
+    Args:
+        fdr_level: level at which FDR must be controlled for a stepdown procedure.
+        m_hyps: number of hypotheses.
+        
+    Returns:
+        A vector of alpha cutoffs that control FDR at fdr_level for stepdown procedures.
+    """
     alpha_vec_raw = create_fdr_controlled_bh_alpha_indpt(fdr_level, m_hyps)
     return create_fdr_controlled_alpha(fdr_level, alpha_vec_raw)
 
 
 def create_fdr_controlled_bl_alpha_indpt(
     fdr_level: FloatArray, m_hyps: int, hedge: bool = True
-):
+) -> FloatArray:
     """Get FDR controlled alpha cutoffs for the Benjamini-Liu stepdown procedure w/independence.
 
     See Benjamini Liu (1999). Stepdown cutoffs for independent hypotheses.
     alpha_i = 1 - (1 - min(1, m * alpha / (m - i + 1))) ** (1 / (m - i + 1))
+
+    Args:
+        fdr_level: level at which FDR must be controlled for a stepdown procedure under independence.
+        m_hyps: number of hypotheses.
+        hedge: if True, shrinks the most significant cutoffs slightly to avoid
+             sure rejects. This will induce weird biases...
+    
+    Returns:
+        A vector of alpha cutoffs that control FDR at fdr_level for stepdown procedures under independence.
     """
     # Create a matrix for the cases
     tempmat = np.ones((2, m_hyps))
@@ -192,9 +246,21 @@ def create_fdr_controlled_bl_alpha_indpt(
     return alpha_vec
 
 
-def create_fdr_controlled_bl_alpha(fdr_level, m_hyps, indpt_fdr_level=None):
-    """a la Benjamini Liu (1999), scaled with Guo Rao for arbitrary joint.
+def create_fdr_controlled_bl_alpha(fdr_level:float, m_hyps:int, indpt_fdr_level:Optional[float]=None) -> FloatArray:
+    """FDR controlled alpha cutoffs for the Benjamini-Liu stepdown procedure
+    
+    Shape from Benjamini Liu (1999), scaled with Guo Rao for arbitrary joint.
     See create_fdr_controlled_bl_alpha_indpt.
+
+    Args:
+        fdr_level: level at which FDR must be controlled for a stepdown procedure.
+        m_hyps: number of hypotheses.
+        indpt_fdr_level: nominal level at which fdr would be controlled for a
+            stepdown BL procedure under independence. Will only affect the 
+            shape of the alpha cutoffs, as the final scaling uses Guo+Rao.
+    
+    Returns:
+        A vector of alpha cutoffs that control FDR at fdr_level for stepdown procedures.
     """
     if indpt_fdr_level is None:
         indpt_fdr_level = fdr_level
@@ -207,8 +273,8 @@ def calc_bh_alpha_and_cuts(
     fdr_level: float, 
     fnr_level: float, 
     N_drugs: int, 
-) -> Tuple[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]:
-    """Caclulates llr alpha and beta and cutoffs for BH procedure
+) -> Tuple[Tuple[FloatArray, FloatArray], Tuple[FloatArray, FloatArray]]:
+    """Caclulates llr alpha and beta and cutoffs for sequential stepdown with BH shape alpha and beta vector.
     
     Args:
         `fdr_level`: desired FDR level
@@ -225,7 +291,29 @@ def calc_bh_alpha_and_cuts(
     return (alpha_vec, beta_vec), calculate_mult_sprt_cutoffs(alpha_vec, beta_vec)
 
 
-def cutoff_truncation(cut_vec):
+def calc_bl_alpha_and_cuts(
+    fdr_level: float, 
+    fnr_level: float, 
+    N_drugs: int, 
+) -> Tuple[Tuple[FloatArray, FloatArray], Tuple[FloatArray, FloatArray]]:
+    """Caclulates llr alpha and beta and cutoffs for sequential stepdown with BL shape alpha and beta vector.
+    
+    Args:
+        `fdr_level`: desired FDR level
+        `fnr_level`: desired FNR level
+        `N_drugs`: number of hypothesea to test
+        
+    Returns:
+        2 2-tuples:
+            1. (alpha_vec, beta_vec): alpha and beta cutoffs for each drug
+            2. (alpha_cutoffs, beta_cutoffs): llr cutoffs for each drug
+    """
+    alpha_vec = create_fdr_controlled_bl_alpha(fdr_level, N_drugs)
+    beta_vec = create_fdr_controlled_bl_alpha(fnr_level, N_drugs)
+    return (alpha_vec, beta_vec), calculate_mult_sprt_cutoffs(alpha_vec, beta_vec)
+
+
+def cutoff_truncation(cut_vec: FloatArray) -> FloatArray:
     """Prevents negative cutoffs."""
     cut_vec = cut_vec.copy()
     # Get least positive cutoff
@@ -240,19 +328,21 @@ def cutoff_truncation(cut_vec):
 
 
 def calculate_mult_sprt_cutoffs(
-    alpha_vec: np.ndarray,
-    beta_vec: np.ndarray,
+    alpha_vec: FloatArray,
+    beta_vec: FloatArray,
     rho: float = 0.583,
     do_trunc: bool = True,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[FloatArray, FloatArray]:
     """Uses Wald approx to calculate llr cutoffs from type 1 and 2 error thresholds.
     A > 0 > B
     Reject H0 when Lambda > A
     Accept H0 when Lambda < B
+
     Args:
         alpha_vec: increasing vector of type 1 error cutoffs.
         beta_vec: increasing vector of type 2 error cutoffs.
         rho: scalar adjustment factor for the Wald approximations.
+
     Returns:
         2-tuple of vectors A_vec and B_vec
         A_vec: increasing rejection cutoffs **for log likelihood ratio**
@@ -289,7 +379,8 @@ def calculate_mult_sprt_cutoffs(
 
         if do_trunc:
             B_vec = -cutoff_truncation(-B_vec)
-
+    assert np.diff(A_vec).max() < 0, "A_vec is non-decreasing"
+    assert np.diff(B_vec).min() > 0, "B_vec is non-increasing"
     return A_vec, B_vec
 
 
@@ -315,13 +406,13 @@ def get_pvalue_cutoffs(A_vec, B_vec, rho=0.583):
 
 
 # TODO: fix this. calculating for reversed statistics
-def pfdr_pfnr_cutoffs(alpha_raw_vec: np.ndarray, 
-                      beta_raw_vec: np.ndarray, 
+def pfdr_pfnr_cutoffs(alpha_raw_vec: FloatArray, 
+                      beta_raw_vec: FloatArray, 
                       pfdr: float, 
                       pfnr:float, 
                       m0:int, 
                       epsilon:float=10.0**-8,
-                      ) -> Tuple[np.ndarray, np.ndarray]:
+                      ) -> Tuple[FloatArray, FloatArray]:
     """pFDR and pFNR controlled pvalue cutoffs for infinite horizon sequential stepdown.
     
     Uses an interative scheme to find pvalue cutoffs that satisfy the pfdr and
@@ -392,7 +483,7 @@ def finite_sim_func(
     imp_sample: bool=True,
     imp_sample_prop: float=0.2,
     imp_sample_hedge: float=0.9,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[FloatArray, FloatArray]:
     """Generate finite sample path maxs (and weights)
 
     Allows use of importance sampling to reduce variance of simulation.
@@ -772,14 +863,14 @@ def infinite_horizon_MC_cutoffs(
     rate_data: pd.Series,
     p0: float,
     p1: float,
-    alpha_levels: np.ndarray,
-    beta_levels: np.ndarray,
+    alpha_levels: FloatArray,
+    beta_levels: FloatArray,
     n_periods: int,
     k_reps: int,
     pair_iters:int=10,
     hyp_type: Optional[str]=None,
     dbg: bool=False,
-) -> np.ndarray:
+) -> FloatArray:
     """Calculate finite horizon rejective cutoffs from alpha levels using MC for drug sims.
 
     Number of simulations should exceed the inverse of the min diff of the
@@ -991,8 +1082,8 @@ def llr_pois_term_moments(lam0, lam1):
 
 
 def est_sample_size(
-    A_vec: np.ndarray,
-    B_vec: np.ndarray,
+    A_vec: FloatArray,
+    B_vec: FloatArray,
     drr: Optional[pd.Series],
     p0: pd.Series,
     p1: pd.Series,

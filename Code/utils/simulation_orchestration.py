@@ -54,7 +54,7 @@ def simfunc(positive_event_rate: pd.Series,
             p1:float, 
             A_B:Tuple[np.ndarray, np.ndarray], 
             n_reps:int, job_id: int, **kwargs) -> List[pd.Series]:
-    """Simulates and runs MultSPRT procedures.
+    """Simulates and runs MultSPRT procedures on drug rate data using prespecified cutoffs.
     
     Args:
         positive_event_rate: (pd.Series) Relevant event rate for each drug.
