@@ -3,45 +3,50 @@ TODO: explain the basic scheme of alpha vetors, raw alpha vectors, llr
 cutoffs, and their signs and orders
 
 List of all functions in this module with one line descriptions:
-* guo_rao_stepdown_fdr_level: Returns FDR bound (by Guo+Rao) for a stepdown 
-    procedure using the provided set of alphas and (optionally) the number of
-    true nulls.
-* guo_rao_scaling: Returns a constanst lambda such that using cutoffs 
-    (alpha_i*lambda, ... ) control fdr at fdr_level
-* create_fdr_controlled_alpha: Returns a vector of alpha cutoffs that control
-     FDR at the given level.
-* create_fdr_controlled_bh_alpha: Get FDR controlled alpha cutoffs for the 
-    Benjamini-Hochberg stepup procedure
-* create_fdr_controlled_bh_alpha_indpt: Get FDR controlled alpha cutoffs for 
-    the Benjamini-Hochberg stepup procedure w/independence.
-* create_fdr_controlled_bl_alpha: Get FDR controlled alpha cutoffs for the 
-    Benjamini-Liu stepdown procedure
-* create_fdr_controlled_bl_alpha_indpt: Get FDR controlled alpha cutoffs 
-    for the Benjamini-Liu stepdown procedure w/independence.
-* calc_bh_alpha_and_cuts: Caclulates llr alpha and beta and cutoffs for 
-    BH procedure
-* cutoff_truncation: sketchy functions that maps negative cutoffs small 
-    positive values... not sure if this is a good idea.
-* calculate_mult_sprt_cutoffs: Uses Wald approx to calculate llr cutoffs from
-    type 1 and 2 error thresholds
-* get_pvalue_cutoffs: Inverts Wald approx to get type 1/2 error cutoffs from 
-    llr cutoffs.
-* pfdr_pfnr_cutoffs: broken? write a unit test
-* finite_sim_func:
-* finite_sim_func_wrapper:
-* empirical_quant_presim_wrapper:
-* finite_horizon_rejective_cutoffs: Calculate finite horizon rejective cutoffs 
-    from alpha levels using MC for drug sim.
-* infinite_horizon_MC_cutoffs: Calculate finite horizon rejective cutoffs from 
-    alpha levels using MC for drug sim.
-* llr_term_moments: Expectation of the llr terms for a drug sim  under the null
-    hypothesis for each step.
-* llr_binom_term_moments: Calculates mean and variance of single-example 
-    binomial llr terms.
-* llr_pois_term_moments: Calculates mean and variance of one step for a poisson
-    llr.
-* est_sample_size: Estimate the sample size needed to accept or reject all 
-    hypotheses
+* FDR values and FDR controlled pvalue adjustments
+    * guo_rao_stepdown_fdr_level: Returns FDR bound (by Guo+Rao) for a stepdown 
+        procedure using the provided set of alphas and (optionally) the number of
+        true nulls.
+    * guo_rao_scaling: Returns a constanst lambda such that using cutoffs 
+        (alpha_i*lambda, ... ) control fdr at fdr_level
+    * create_fdr_controlled_alpha: Returns a vector of alpha cutoffs that control
+        FDR at the given level.
+    * create_fdr_controlled_bh_alpha: Get FDR controlled alpha cutoffs for the 
+        Benjamini-Hochberg stepup procedure
+    * create_fdr_controlled_bh_alpha_indpt: Get FDR controlled alpha cutoffs for 
+        the Benjamini-Hochberg stepup procedure w/independence.
+    * create_fdr_controlled_bl_alpha: Get FDR controlled alpha cutoffs for the 
+        Benjamini-Liu stepdown procedure
+    * create_fdr_controlled_bl_alpha_indpt: Get FDR controlled alpha cutoffs 
+        for the Benjamini-Liu stepdown procedure w/independence.
+* LLR cutoffs
+    * calc_bh_alpha_and_cuts: Caclulates llr alpha and beta and cutoffs for 
+        BH procedure
+    * cutoff_truncation: sketchy functions that maps negative cutoffs small 
+        positive values... not sure if this is a good idea.
+    * calculate_mult_sprt_cutoffs: Uses Wald approx to calculate llr cutoffs from
+        type 1 and 2 error thresholds
+    * get_pvalue_cutoffs: Inverts Wald approx to get type 1/2 error cutoffs from 
+        llr cutoffs.
+    * pfdr_pfnr_cutoffs: broken? write a unit test
+* ????
+    * finite_sim_func:
+    * finite_sim_func_wrapper:
+    * empirical_quant_presim_wrapper:
+    * finite_horizon_rejective_cutoffs: Calculate finite horizon rejective cutoffs 
+        from alpha levels using MC for drug sim.
+    * infinite_horizon_MC_cutoffs: Calculate finite horizon rejective cutoffs from 
+        alpha levels using MC for drug sim.
+* LLR moments for different types of hypotheses
+    * llr_term_moments: Expectation of the llr terms for a drug sim  under the null
+        hypothesis for each step.
+    * llr_binom_term_moments: Calculates mean and variance of single-example 
+        binomial llr terms.
+    * llr_pois_term_moments: Calculates mean and variance of one step for a poisson
+        llr.
+    * est_sample_size: Estimate the sample size needed to accept or reject all 
+        hypotheses
+* Importance Sampling helper functions (calculate imp samp weights)
 
 """
 from typing import Any, Dict, List, Literal, Optional, Tuple
@@ -58,7 +63,6 @@ import time
 import logging
 import traceback
 import itertools
-import traceback
 import copy
 from scipy.stats import norm as gaussian
 
@@ -1033,3 +1037,50 @@ def est_sample_size(
         )
 
     return int(np.max((e1n(A_vec[0], B_vec[0], mu_1), e0n(A_vec[0], B_vec[0], mu_0))))
+
+
+
+# Importance sampling section
+
+def imp_sample_drug_weight(counts, p0, p1, drr0=None, drr1=None):
+    amcount = counts[0].iloc[-1, :] # Final step is all thats important
+    nonamcount = counts[1].iloc[-1, :]
+    am_factor = p0 / p1
+    nonam_factor = (1 - p0) / (1 - p1)
+    log_weight = amcount * np.log(am_factor) + nonamcount * np.log(nonam_factor)
+    raw_weight = np.exp(log_weight)
+    if np.isnan(raw_weight).any():
+        logger = logging.getLogger()
+        logger.debug("NaN weights: {0}".format(raw_weight[np.isnan(raw_weight)]))
+        logger.debug("Log weights: {0}".format(log_weight[np.isnan(raw_weight)]))
+
+    if drr0 is not None and drr1 is not None:
+        # Number of periods
+        T = counts[0].shape[0]
+        weight = raw_weight * ((drr0 / drr1).astype('float128') ** (amcount + nonamcount)) * np.exp(-T * (drr0 - drr1)).astype('float128')
+    else:
+        weight = raw_weight
+    return weight
+
+def imp_sample_binom_weight(counts, p0, p1):
+    events = counts.iloc[-1, :] # Final step is all thats important
+    fail_events = counts.shape[0] - events
+    event_factor = p0 / p1
+    fail_factor = (1 - p0) / (1 - p1)
+    log_weight = events * np.log(event_factor) + fail_events * np.log(fail_factor)
+    return np.exp(log_weight)
+
+def imp_sample_pois_weight(counts, p0, p1):
+    events = counts.iloc[-1, :] # Final step is all thats important
+    n = counts.shape[0]
+    factor = p0 / p1
+    # irrelevant factor 
+    # stupid = np.exp(-counts.shape[0]*(po - p1))
+    log_weight = events * np.log(factor) - n * (p0 - p1)
+    return np.exp(log_weight)
+
+
+def imp_sample_gaussian_weight(counts, p0, p1, drr):
+    raise Exception("Not implemented yet. Composite or simple? SD or VAR?")
+    
+    

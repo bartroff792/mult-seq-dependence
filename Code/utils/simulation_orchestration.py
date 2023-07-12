@@ -1,7 +1,8 @@
 """Simulation functions for MultSeq.
 
-This module contains functions for simulating data for sequential testing 
-of multiple hypotheses, and executing those procedures on it.
+This module contains functions for higher level simulation for sequential testing 
+of multiple hypotheses (beyond just generating the observations), and 
+executing the SPRT procedures on it.
 
 Functions:
     simfunc: Simulates and runs MultSPRT procedures.

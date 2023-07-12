@@ -1,28 +1,72 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Jul  7 23:21:28 2016
+"""Funcs for reading drug data, generating fake data, generating hypotheses, and computing llr paths.
 
-@author: mike
+List of all functions in this module:
+* Loading and screening drug data
+    * gen_skew_prescreen:
+    * read_drug_data:
+    * prescreen_abs:
+    * prescreen_rel:
+    * drug_data_metadata:
+* Generate fake data rates (but not observations)
+    * assemble_fake_drugs:
+    * assemble_fake_gaussian:
+    * assemble_fake_binom:
+    * assemble_fake_pois:
+    * assemble_fake_pois_grad:
+* Generate fake observations
+    * simulate_reactions: Given series of drug amnesia and non-amnesia rates, gerenates data.
+    * simulate_binom:
+    * simulate_pois:
+* Assemble llr statistic paths based on hypotheses and observed data
+    * assemble_drug_llr:
+    * assemble_binom_llr:
+    * assemble_pois_llr:
+    * generate_llr: takes a distribution argument, generates observation path, and calls one of the specific llrs
+* Generate null and alt hypotheses from drug reaction data
+    * whole_data_p0:
+    * whole_data_p1:
+    * drug_data_p1:
+    * am_prop_percentile_p0_p1:
+* Possibly functional data generators for correlated data streams
+    * toep_corr_matrix:
+    * simulate_correlated_reactions:
+    * simulate_correlated_binom:
+    * simulate_correlated_pois:
+* Non-functional data generator structures for future use in real streaming applications
+
 """
-import pandas
+from typing import Dict, List,  Optional, Tuple
+import pandas as pd
 import datetime, os, string, warnings
-import numpy
+import numpy as np
 import numpy.random
-from numpy import array, linspace, repeat, tile, newaxis, exp, ones, hstack, vstack
-from numpy import zeros, log, sqrt, arange, percentile, logical_and, isnan
 from scipy.linalg import toeplitz
 from scipy.stats import norm, multivariate_normal, poisson, binom
 import hashlib
 import logging
+from dataclasses import dataclass
 
-def gen_names(n_hyps):
+def gen_names(n_hyps: int) -> List[str]:
+    """Generates a list of n_hyps unique names for hypotheses.
+    
+    Names will all be of the same length and take the form
+    {hypothesis number}-{hashed string}
+    for instance, if there are 12 hypotheses we might have
+    07-3f2
+
+    Args:
+        n_hyps (int): number of hypotheses to generate names for.
+    
+    Returns:
+        List[str]: list of names for hypotheses.
+    """
     STR_LEN = 3
     digits = int(numpy.ceil(numpy.log10(n_hyps)))
     for i in range(n_hyps):
         return [("{0:0=" + str(digits) + "d}-{1}").format(i, hashlib.sha1(str(i).encode("utf-8")).hexdigest()[:STR_LEN]) for i in range(n_hyps)]
         
 
-
+# TODO: hardcoding this is EXTREMELY amateur
 TOTAL_AMNESIA_CNAME = "Total All"
 TOTAL_REACTS_CNAME = "total_reactions"
 DATA_FILE_PATH = os.path.expanduser('../../Data/YellowcardData.csv')
@@ -39,15 +83,26 @@ def gen_skew_prescreen(min_am=1, min_tot=20, aug_am=1, aug_non=1):
         return screened_df
     return skew_prescreen
 
-def read_drug_data(path: str, prescreen=None, aug=1):
+def read_drug_data(path: str, prescreen: bool=True, aug:int=1) -> Tuple[pd.Series, pd.Series, Tuple[int, int]]:
     """Read drug reaction rates and some metadata from file.
+
+    Args:
+        path (str): path to csv file containing drug reaction data.
+        prescreen (bool, optional): whether to prescreen drugs with few reports. Defaults to True.
+        aug (int, optional): amount to augment amnesia and non-amnesia report counts by. Defaults to 1.
+
+    Returns:
+        Tuple[pd.Series, pd.Series, Tuple[int, int]]: Tuple containing:
+            * amnesia rates for each drug
+            * non-amnesia rates for each drug
+            * tuple containing (total number of amnesia reports, total number of all side effect reports)
     """
     # sum total days over all drugs, divide total reports by that 
     # emit reports from each drug and total drugs with given rates
     # can't be formulated as sprt.... look at bartroff's???
     
 
-    reacts_df = pandas.read_csv(path, index_col=0, 
+    reacts_df = pd.read_csv(path, index_col=0, 
                                 parse_dates=["end_date","start_date", "first_react"])
 
     # Here either exclude drugs without first report date or fill in report start date
@@ -69,26 +124,80 @@ def read_drug_data(path: str, prescreen=None, aug=1):
     drug_reacts_rate = (2 * aug + reacts_df[TOTAL_REACTS_CNAME])/date_range_col
     drug_nonamnesia_rate = drug_reacts_rate - drug_amnesia_rate
     return drug_amnesia_rate, drug_nonamnesia_rate, (N_amnesia, N_reports)
+
+
+def prescreen_abs(min_am_reacts: int, min_total_reacts: int) -> Callable[[pd.DataFrame, str, str], pd.DataFrame]:
+    """Creates a prescreening function based on absolute reaction counts.
     
+    For use in read_data. Clips drugs with too few reports based on absolute counts.
+
+    Args:
+        min_am_reacts (int): minimum number of amnesia reports for a drug to be included.
+        min_total_reacts (int): minimum number of total side effect reports for a drug to be included.
+    
+    Returns:
+        Callable[[pd.DataFrame, str, str], pd.DataFrame]: prescreening function that takes
+            a dataframe of drug reaction rates and returns a dataframe of drug reaction rates.
+    """
+    def prescreen(reacts_df: pd.DataFrame, TOTAL_AMNESIA_CNAME: str, TOTAL_REACTS_CNAME: str) -> pd.DataFrame:
+        """Screens a dataframe of drug reaction rates for drugs with too few reports."""
+        mask = np.logical_and(reacts_df[TOTAL_AMNESIA_CNAME] >= min_am_reacts,
+                           reacts_df[TOTAL_REACTS_CNAME] >= min_total_reacts)
+        return reacts_df[mask]
+    return prescreen
+        
+
+def prescreen_rel(min_am_reacts_percentile: float, min_total_reacts_percentile: float) -> Callable[[pd.DataFrame, str, str], pd.DataFrame]:
+    """Creates a prescreening function based on percentile reaction counts.
+    
+    For use in read_data. Clips drugs with too few reports based on percentiles.
+
+    Args:
+        min_am_reacts_percentile (float): minimum percentile of amnesia reports for a drug to be included. Between 1 and 99.
+        min_total_reacts_percentile (float): minimum percentile of total side effect reports for a drug to be included. Between 1 and 99.
+
+    Returns:
+        Callable[[pd.DataFrame, str, str], pd.DataFrame]: prescreening function that takes a dataframe of drug reaction rates and 
+            returns a dataframe of drug reaction rates.
+    """
+    def prescreen(reacts_df: pd.DataFrame, TOTAL_AMNESIA_CNAME:str, TOTAL_REACTS_CNAME:str) -> pd.DataFrame:
+        """Removes drugs with too few reports from a dataframe of drug reaction rates."""
+        min_am_reacts = np.percentile(reacts_df[TOTAL_AMNESIA_CNAME], 
+                                   min_am_reacts_percentile)
+        min_total_reacts = np.percentile(reacts_df[TOTAL_REACTS_CNAME], 
+                                      min_total_reacts_percentile)
+        mask = np.logical_and(reacts_df[TOTAL_AMNESIA_CNAME] >= min_am_reacts,
+                           reacts_df[TOTAL_REACTS_CNAME] >= min_total_reacts)
+        return reacts_df[mask]
+    return prescreen    
+
+
+@dataclass
+class drug_data_metadata(object):
+    N_reports: int
+    N_amnesia: int
+    p0: float
+    p1: float
+    n_periods: int
 
 def assemble_fake_drugs(max_magnitude, m_null, interleaved, p0, p1):
     """Assembles dar and dnar for fake drugs.
     
     """
-    mag_vec = linspace(1, max_magnitude, m_null)
+    mag_vec = np.linspace(1, max_magnitude, m_null)
     
     
     drug_names = gen_names(2 * m_null)
     
     # Create null/alternative masks, and total magnitude series
     if interleaved:
-        ground_truth = pandas.Series(tile(array([True, False]), m_null), 
+        ground_truth = pd.Series(np.tile(np.array([True, False]), m_null), 
                                      index=drug_names)
-        drr = pandas.Series(repeat(mag_vec, 2), index=drug_names)
+        drr = pd.Series(np.repeat(mag_vec, 2), index=drug_names)
     else:        
-        ground_truth = pandas.Series(repeat(array([True, False]), m_null), 
+        ground_truth = pd.Series(np.repeat(np.array([True, False]), m_null), 
                                      index=drug_names)
-        drr = pandas.Series(tile(mag_vec, 2), index=drug_names)
+        drr = pd.Series(np.tile(mag_vec, 2), index=drug_names)
         
     # Create (non) amensia magnitude
     dar = (p0 * ground_truth + p1 * ~ground_truth) * drr
@@ -100,26 +209,26 @@ def assemble_fake_gaussian(max_magnitude, m_null, p0, p1, m_alt=None):
     """Assembles dar and dnar for fake gaussian.
     
     """
-    var_vec_true = linspace(1, max_magnitude, m_null)
-    var_vec_false = linspace(1, max_magnitude, m_alt)
-    #drr = repeat(mag_vec, 2)
+    var_vec_true = np.linspace(1, max_magnitude, m_null)
+    var_vec_false = np.linspace(1, max_magnitude, m_alt)
+    #drr = np.repeat(mag_vec, 2)
     #dar = concatenate((p0 * mag_vec, p1 * mag_vec)) 
     
     
     drug_names = gen_names(m_null + m_alt)
 #    list(map(lambda u,v: u + v, 
-#                     array(list(string.ascii_letters))[arange(0, 4 * m_null, 2)], 
-#                     array(list(string.ascii_letters))[arange(1, 4 * m_null, 2)]))
+#                     np.array(list(string.ascii_letters))[np.arange(0, 4 * m_null, 2)], 
+#                     np.array(list(string.ascii_letters))[np.arange(1, 4 * m_null, 2)]))
     
     # Create null/alternative masks, and total magnitude series    
     if m_alt is None:
-        ground_truth = pandas.Series(repeat(array([True, False]), m_null), 
+        ground_truth = pd.Series(np.repeat(np.array([True, False]), m_null), 
                                  index=drug_names)
     else:
-        ground_truth = pandas.Series(repeat(array([True, False]), [m_null, m_alt]), 
+        ground_truth = pd.Series(np.repeat(np.array([True, False]), [m_null, m_alt]), 
                                  index=drug_names)
     mean_vec = (p0 * ground_truth + p1 * ~ground_truth) 
-    sd_vec = pandas.Series(sqrt(numpy.concatenate((var_vec_true, var_vec_false))), index=mean_vec.index)
+    sd_vec = pd.Series(np.sqrt(numpy.concatenate((var_vec_true, var_vec_false))), index=mean_vec.index)
     
     return mean_vec, sd_vec, ground_truth
     
@@ -132,24 +241,24 @@ def assemble_fake_binom(m_null, interleaved, p0, p1, m_alt=None):
     else:
         drug_names = gen_names(m_null + m_alt)
 #    list(map(lambda u,v: u + v, 
-#                     array(list(string.ascii_letters))[arange(0, 4 * m_null, 2)], 
-#                     array(list(string.ascii_letters))[arange(1, 4 * m_null, 2)]))
+#                     np.array(list(string.ascii_letters))[np.arange(0, 4 * m_null, 2)], 
+#                     np.array(list(string.ascii_letters))[np.arange(1, 4 * m_null, 2)]))
 #    
     # Create null/alternative masks, and total magnitude series
     if interleaved:
         if m_alt is None:
-            ground_truth = pandas.Series(tile(array([True, False]), m_null), 
+            ground_truth = pd.Series(np.tile(np.array([True, False]), m_null), 
                                      index=drug_names)
         else:
-            ground_truth = pandas.Series(tile(array([True, False]), [m_null, m_alt]), 
+            ground_truth = pd.Series(np.tile(np.array([True, False]), [m_null, m_alt]), 
                                      index=drug_names)
         
     else:        
         if m_alt is None:
-            ground_truth = pandas.Series(repeat(array([True, False]), m_null), 
+            ground_truth = pd.Series(np.repeat(np.array([True, False]), m_null), 
                                      index=drug_names)
         else:
-            ground_truth = pandas.Series(repeat(array([True, False]), [m_null, m_alt]), 
+            ground_truth = pd.Series(np.repeat(np.array([True, False]), [m_null, m_alt]), 
                                      index=drug_names)
         
     # Create (non) amensia magnitude
@@ -166,24 +275,24 @@ def assemble_fake_pois(m_null, interleaved, p0, p1, m_alt=None):
     else:
         drug_names = gen_names(m_null + m_alt)
 #    drug_names = list(map(lambda u,v: u + v, 
-#                     array(list(string.ascii_letters))[arange(0, 4 * m_null, 2)], 
-#                     array(list(string.ascii_letters))[arange(1, 4 * m_null, 2)]))
+#                     np.array(list(string.ascii_letters))[np.arange(0, 4 * m_null, 2)], 
+#                     np.array(list(string.ascii_letters))[np.arange(1, 4 * m_null, 2)]))
     
     # Create null/alternative masks, and total magnitude series
     if interleaved:
         if m_alt is None:
-            ground_truth = pandas.Series(tile(array([True, False]), m_null), 
+            ground_truth = pd.Series(np.tile(np.array([True, False]), m_null), 
                                      index=drug_names)
         else:
-            ground_truth = pandas.Series(tile(array([True, False]), [m_null, m_alt]), 
+            ground_truth = pd.Series(np.tile(np.array([True, False]), [m_null, m_alt]), 
                                      index=drug_names)
         
     else:        
         if m_alt is None:
-            ground_truth = pandas.Series(repeat(array([True, False]), m_null), 
+            ground_truth = pd.Series(np.repeat(np.array([True, False]), m_null), 
                                      index=drug_names)
         else:
-            ground_truth = pandas.Series(repeat(array([True, False]), [m_null, m_alt]), 
+            ground_truth = pd.Series(np.repeat(np.array([True, False]), [m_null, m_alt]), 
                                      index=drug_names)
                                          
         
@@ -201,18 +310,18 @@ def assemble_fake_pois_grad(m_null, p0, p1, m_alt=None):
     lam0 = min((p0, p1))
     lam1 = max((p0, p1))
     lam_ratio = lam0 / lam1
-    log_low_lam = log(lam0) + log(lam_ratio)
-    log_high_lam = log(lam1) - log(lam_ratio)
-    dar_vals = exp(linspace(log_low_lam, log_high_lam, m_null + m_alt))
+    log_low_lam = np.log(lam0) + np.log(lam_ratio)
+    log_high_lam = np.log(lam1) - np.log(lam_ratio)
+    dar_vals = np.exp(np.linspace(log_low_lam, log_high_lam, m_null + m_alt))
     drug_names = gen_names(m_null + m_alt)
 #    drug_names = list(map(lambda u,v: u + v, 
-#                     array(list(string.ascii_letters))[arange(0, 4 * m_null, 2)], 
-#                     array(list(string.ascii_letters))[arange(1, 4 * m_null, 2)]))
+#                     np.array(list(string.ascii_letters))[np.arange(0, 4 * m_null, 2)], 
+#                     np.array(list(string.ascii_letters))[np.arange(1, 4 * m_null, 2)]))
     
-    return pandas.Series(dar_vals, index=drug_names)
+    return pd.Series(dar_vals, index=drug_names)
 
     
-def simulate_reactions(drug_amnesia_rate, drug_nonamnesia_rate, n_periods):
+def simulate_reactions(drug_amnesia_rate: pd.Series, drug_nonamnesia_rate: pd.Series, n_periods: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Given series of drug amnesia and non-amnesia rates, gerenates data.
     
     args:
@@ -222,44 +331,49 @@ def simulate_reactions(drug_amnesia_rate, drug_nonamnesia_rate, n_periods):
     return:
         tuple of DataFrames of reactions. Columns are drugs, rows are periods.
     """
-    sim_amnesia_reactions = pandas.DataFrame(dict([
+    sim_amnesia_reactions = pd.DataFrame(dict([
                 (drug_name, poisson.rvs(individual_drug_rate, size=n_periods)) if individual_drug_rate>0
-                else (drug_name, zeros(n_periods))
+                else (drug_name, np.zeros(n_periods))
                 for drug_name, individual_drug_rate in drug_amnesia_rate.iteritems()])).cumsum()
     
-    sim_nonamnesia_reactions = pandas.DataFrame(dict([
+    sim_nonamnesia_reactions = pd.DataFrame(dict([
                 (drug_name, poisson.rvs(individual_drug_rate, size=n_periods)) if individual_drug_rate>0
-                else (drug_name, zeros(n_periods))
+                else (drug_name, np.zeros(n_periods))
                 for drug_name, individual_drug_rate in drug_nonamnesia_rate.iteritems()])).cumsum()
     return (sim_amnesia_reactions.reindex(columns=drug_amnesia_rate.index), 
             sim_nonamnesia_reactions.reindex(columns=drug_nonamnesia_rate.index))
 
     
-def simulate_gaussian_noncum_internal(gauss_moments_df, n_periods):
-    return pandas.DataFrame(dict([(hyp_name, hyp_data["mean"] + hyp_data["sd"]*numpy.random.randn(n_periods))
-        for hyp_name, hyp_data in gauss_moments_df.iterrows()])).reindex(columns=gauss_moments_df.index)
+# def simulate_gaussian_noncum_internal(gauss_moments_df, n_periods):
+#     out_dict = {}
+#     for hyp_name, hyp_data in gauss_moments_df.iterrows():
+#         out_dict[hyp_name] = hyp_data["mean"] + hyp_data["sd"]*numpy.random.randn(n_periods)
+#     return pd.DataFrame(out_dict).reindex(columns=gauss_moments_df.index)
     
-def simulate_gaussian_noncum(dar, dnar, n_periods):
-    return simulate_gaussian_noncum_internal(pandas.DataFrame({"mean":dar, "sd":dnar}), n_periods)
+# def simulate_gaussian_noncum(dar, dnar, n_periods):
+#     return simulate_gaussian_noncum_internal(pd.DataFrame({"mean":dar, "sd":dnar}), n_periods)
 
-def simulate_binom(bin_props, n_periods):
-    return pandas.DataFrame(dict([(hyp_name, binom.rvs(1, hyp_prop, size=n_periods))
-        for hyp_name, hyp_prop in bin_props.iteritems()])).cumsum().reindex(columns=bin_props.index)
+def simulate_binom(bin_props: pd.Series, n_periods: int)-> pd.DataFrame:
+    """Generates cumulative success counts for binomial processes."""
+    out_dict = {}
+    for hyp_name, hyp_prop in bin_props.iteritems():
+        out_dict[hyp_name] = binom.rvs(1, hyp_prop, size=n_periods)
+    return pd.DataFrame(out_dict).cumsum().reindex(columns=bin_props.index)
 
 def simulate_pois(pois_rates, n_periods):
-    return pandas.DataFrame(dict([(hyp_name, poisson.rvs(hyp_rate, size=n_periods))
+    return pd.DataFrame(dict([(hyp_name, poisson.rvs(hyp_rate, size=n_periods))
         for hyp_name, hyp_rate in pois_rates.iteritems()])).cumsum().reindex(columns=pois_rates.index)    
 
     
         
-def assemble_llr(amnesia, nonamnesia, p0, p1):
-    """deprecated. Use assemble_drug_llr.
-    log(L(p1)/L(p0))
-    E[llr|H0] > 0
-    E[llr|H1] < 0
-    """
-    warnings.warn("assemble_llr is deprecated. Use assemble_drug_llr.")
-    return amnesia * log(p1/p0) + nonamnesia * log((1 - p1) / (1 - p0))
+# def assemble_llr(amnesia, nonamnesia, p0, p1):
+#     """deprecated. Use assemble_drug_llr.
+#     np.log(L(p1)/L(p0))
+#     E[llr|H0] > 0
+#     E[llr|H1] < 0
+#     """
+#     warnings.warn("assemble_llr is deprecated. Use assemble_drug_llr.")
+#     return amnesia * np.log(p1/p0) + nonamnesia * np.log((1 - p1) / (1 - p0))
 
 
 def assemble_drug_llr(counts, p0, p1):
@@ -269,43 +383,43 @@ def assemble_drug_llr(counts, p0, p1):
     p1:
         
         
-    log(L(p1)/L(p0))
+    np.log(L(p1)/L(p0))
     E[llr|H0] > 0
     E[llr|H1] < 0
     """
-    return counts[0] * log(p1/p0) + counts[1] * log((1 - p1) / (1 - p0))
+    return counts[0] * np.log(p1/p0) + counts[1] * np.log((1 - p1) / (1 - p0))
 
 
 def assemble_binom_llr(bin_count, p0, p1):
-    """log(L(p1)/L(p0))
+    """np.log(L(p1)/L(p0))
     E[llr|H0] > 0
     E[llr|H1] < 0
     """
     pos_count = bin_count
-    neg_count = (arange(1, len(bin_count) + 1))[:, newaxis] - bin_count
-    return pos_count * log(p1/p0) + neg_count * log((1 - p1) / (1 - p0))
+    neg_count = (np.arange(1, len(bin_count) + 1))[:, np.newaxis] - bin_count
+    return pos_count * np.log(p1/p0) + neg_count * np.log((1 - p1) / (1 - p0))
     
     
-def assemble_gaussian_llr(samps_noncum, p0, p1):
-    """log(L(p1)/L(p0))
-    E[llr|H0] > 0
-    E[llr|H1] < 0
-    """
-    samps_idx = arange(1.0, len(samps_noncum) + 1)
-    est_var0 = (1.0 / samps_idx[:, numpy.newaxis]) * ((samps_noncum - p0)**2.0).cumsum()
-    est_var1 = (1.0 / samps_idx[:, numpy.newaxis]) * ((samps_noncum - p1)**2.0).cumsum()
-    return -.5 * samps_idx[:, numpy.newaxis] * (log(est_var1) - log(est_var0))
+# def assemble_gaussian_llr(samps_noncum, p0, p1):
+#     """np.log(L(p1)/L(p0))
+#     E[llr|H0] > 0
+#     E[llr|H1] < 0
+#     """
+#     samps_idx = np.arange(1.0, len(samps_noncum) + 1)
+#     est_var0 = (1.0 / samps_idx[:, numpy.np.newaxis]) * ((samps_noncum - p0)**2.0).cumsum()
+#     est_var1 = (1.0 / samps_idx[:, numpy.np.newaxis]) * ((samps_noncum - p1)**2.0).cumsum()
+#     return -.5 * samps_idx[:, numpy.np.newaxis] * (np.log(est_var1) - np.log(est_var0))
 
 
 def assemble_pois_llr(pois_count, lam0, lam1):
-    """log(L(p1)/L(p0))
+    """np.log(L(p1)/L(p0))
     E[llr|H0] > 0
     E[llr|H1] < 0
     """
-    period_idx = pandas.DataFrame(ones(pois_count.shape), columns=pois_count.columns,
+    period_idx = pd.DataFrame(np.ones(pois_count.shape), columns=pois_count.columns,
                                   index=pois_count.index).cumsum()
 
-    return (log(lam1 / lam0) * pois_count) - (period_idx * (lam1 - lam0))
+    return (np.log(lam1 / lam0) * pois_count) - (period_idx * (lam1 - lam0))
 
 def generate_llr(dar, dnar, n_periods, rho, hyp_type, p0, p1, 
                  m1=None, rho1=None, rand_order=False, cummax=False):
@@ -322,9 +436,10 @@ def generate_llr(dar, dnar, n_periods, rho, hyp_type, p0, p1,
                                                           m1, rho1, rand_order=rand_order)
         llr = assemble_pois_llr(event_count, p0, p1)
     elif hyp_type == "gaussian":
-        gvals = simulate_correlated_gaussian_noncum(dar, dnar, n_periods, 
-                                                               rho, m1, rho1, rand_order=rand_order)
-        llr = assemble_gaussian_llr(gvals, p0, p1)
+        raise NotImplementedError("Gaussian LLR not implemented yet.")
+        # gvals = simulate_correlated_gaussian_noncum(dar, dnar, n_periods, 
+        #                                                        rho, m1, rho1, rand_order=rand_order)
+        # llr = assemble_gaussian_llr(gvals, p0, p1)
     else:
         raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
     if cummax:
@@ -332,53 +447,6 @@ def generate_llr(dar, dnar, n_periods, rho, hyp_type, p0, p1,
     else:
         return llr
 
-
-def imp_sample_drug_weight(counts, p0, p1, drr0=None, drr1=None):
-    amcount = counts[0].iloc[-1, :] # Final step is all thats important
-    nonamcount = counts[1].iloc[-1, :]
-    am_factor = p0 / p1
-    nonam_factor = (1 - p0) / (1 - p1)
-    log_weight = amcount * log(am_factor) + nonamcount * log(nonam_factor)
-    raw_weight = exp(log_weight)
-    if isnan(raw_weight).any():
-        logger = logging.getLogger()
-        logger.debug("NaN weights: {0}".format(raw_weight[isnan(raw_weight)]))
-        logger.debug("Log weights: {0}".format(log_weight[isnan(raw_weight)]))
-#    print(raw_weight)
-#    print(raw_weight[isnan(raw_weight)])
-#    print(drr0[isnan(raw_weight)])
-#    print(counts[0].iloc[-1, :][isnan(raw_weight)])
-#    print(counts[1].iloc[-1, :][isnan(raw_weight)])
-#    print(counts[0].iloc[-1, :].head())
-    if drr0 is not None and drr1 is not None:
-        T = counts[0].shape[0]
-        weight = raw_weight * ((drr0 / drr1).astype('float128') ** (amcount + nonamcount)) * exp(-T * (drr0 - drr1)).astype('float128')
-    else:
-        weight = raw_weight
-    return weight
-
-def imp_sample_binom_weight(counts, p0, p1):
-    events = counts.iloc[-1, :] # Final step is all thats important
-    fail_events = counts.shape[0] - events
-    event_factor = p0 / p1
-    fail_factor = (1 - p0) / (1 - p1)
-    log_weight = events * log(event_factor) + fail_events * log(fail_factor)
-    return exp(log_weight)
-
-def imp_sample_pois_weight(counts, p0, p1):
-    events = counts.iloc[-1, :] # Final step is all thats important
-    n = counts.shape[0]
-    factor = p0 / p1
-    # irrelevant factor 
-    # stupid = exp(-counts.shape[0]*(po - p1))
-    log_weight = events * log(factor) - n * (p0 - p1)
-    return exp(log_weight)
-
-
-def imp_sample_gaussian_weight(counts, p0, p1, drr):
-    raise Exception("Not implemented yet. Composite or simple? SD or VAR?")
-    
-    
 
 def whole_data_p0(N_amnesia, N_reports):
     """
@@ -390,52 +458,25 @@ def whole_data_p0(N_amnesia, N_reports):
 
 def whole_data_p1(N_amnesia, N_reports, p0, n_se=2.0):
     """Get p1 above p0 based on total reports SE for p0 estimate"""
-    return p0 + n_se * sqrt(p0 * (1-p0) / N_reports)
+    return p0 + n_se * np.sqrt(p0 * (1-p0) / N_reports)
     
 def drug_data_p1(N_drugs, p0, n_se=2.0):
     """Get p1 above p0 based on total drugs SE for p0 estimate"""
-    return p0 + n_se * sqrt(p0 * (1-p0) / N_drugs)
+    return p0 + n_se * np.sqrt(p0 * (1-p0) / N_drugs)
     
 def am_prop_percentile_p0_p1(dar, dnar, p0_pctl, p1_pctl):
     """Get p0 and p1 as percentiles of amnesia proportion"""
     am_prop = dar / (dar + dnar)
-    return numpy.percentile(am_prop, [100*p0_pctl, 100*p1_pctl])
-    
-def prescreen_abs(min_am_reacts, min_total_reacts):
-    """Creates a prescreening function based on absolute reaction counts.
-    For use in read_data
-    
-    """
-    def prescreen(reacts_df, TOTAL_AMNESIA_CNAME, TOTAL_REACTS_CNAME):
-        mask = logical_and(reacts_df[TOTAL_AMNESIA_CNAME] >= min_am_reacts,
-                           reacts_df[TOTAL_REACTS_CNAME] >= min_total_reacts)
-        return reacts_df[mask]
-    return prescreen
-        
-
-def prescreen_rel(min_am_reacts_percentile, min_total_reacts_percentile):
-    """Creates a prescreening function based on percentile reaction counts.
-    For use in read_data
-    
-    """
-    def prescreen(reacts_df, TOTAL_AMNESIA_CNAME, TOTAL_REACTS_CNAME):
-        min_am_reacts = percentile(reacts_df[TOTAL_AMNESIA_CNAME], 
-                                   min_am_reacts_percentile)
-        min_total_reacts = percentile(reacts_df[TOTAL_REACTS_CNAME], 
-                                      min_total_reacts_percentile)
-        mask = logical_and(reacts_df[TOTAL_AMNESIA_CNAME] >= min_am_reacts,
-                           reacts_df[TOTAL_REACTS_CNAME] >= min_total_reacts)
-        return reacts_df[mask]
-    return prescreen    
+    return np.percentile(am_prop, [100*p0_pctl, 100*p1_pctl])
     
     
 def toep_corr_matrix(m, rho, m1=None, rho1=None, rand_order=False):
     
     
     if m1 is None:
-        raw_corr_mat = toeplitz(rho ** abs(arange(m)))
+        raw_corr_mat = toeplitz(rho ** abs(np.arange(m)))
         if rand_order:
-            ordering = numpy.random.permutation(arange(m))
+            ordering = numpy.random.permutation(np.arange(m))
             print(ordering)
             corr_mat = (raw_corr_mat[ordering, :])[:, ordering]
             return corr_mat
@@ -451,9 +492,9 @@ def toep_corr_matrix(m, rho, m1=None, rho1=None, rand_order=False):
             rho1 = rho
         UL = toep_corr_matrix(m0, rho0)
         BR = toep_corr_matrix(m1, rho1)
-        UR = zeros((m0, m1))
-        BL = zeros((m1, m0))
-        outmat = vstack([hstack([UL, UR]), hstack([BL, BR])])
+        UR = np.zeros((m0, m1))
+        BL = np.zeros((m1, m0))
+        outmat = np.vstack([np.hstack([UL, UR]), np.hstack([BL, BR])])
 #        print(outmat.round(1))
         return outmat
         
@@ -470,24 +511,24 @@ def simulate_correlated_reactions(drug_amnesia_rate, drug_nonamnesia_rate, n_per
             
         # TODO: fix 
         cov_mat = toep_corr_matrix(len(drug_amnesia_rate), rho, m1, rho1, rand_order=rand_order) 
-        #toeplitz(rho** abs(arange(len(drug_amnesia_rate))))
-        #cov_mat[arange(0, N_reports, 5)[:,newaxis], arange(0, N_reports, 5)] = cov_mat[arange(0, N_reports, 5)[:,newaxis], arange(0, N_reports, 5)]**0.5
-        uuA = pandas.DataFrame(norm.cdf(multivariate_normal(cov=cov_mat).rvs(size=n_periods)), 
+        #toeplitz(rho** abs(np.arange(len(drug_amnesia_rate))))
+        #cov_mat[np.arange(0, N_reports, 5)[:,np.newaxis], np.arange(0, N_reports, 5)] = cov_mat[np.arange(0, N_reports, 5)[:,np.newaxis], np.arange(0, N_reports, 5)]**0.5
+        uuA = pd.DataFrame(norm.cdf(multivariate_normal(cov=cov_mat).rvs(size=n_periods)), 
                               columns = drug_amnesia_rate.index)
-        uuB = pandas.DataFrame(norm.cdf(multivariate_normal(cov=cov_mat).rvs(size=n_periods)), 
+        uuB = pd.DataFrame(norm.cdf(multivariate_normal(cov=cov_mat).rvs(size=n_periods)), 
                               columns = drug_amnesia_rate.index)
     
         # Running total of reaction reports
         # Iterates through drugs, generating random samples of size n_periods for 
         # each drug with nonzero rate.
-        sim_amnesia_reactions = pandas.DataFrame(dict([
+        sim_amnesia_reactions = pd.DataFrame(dict([
                     (drug_name, poisson.ppf(uuA[drug_name], individual_drug_rate)) if individual_drug_rate>0
-                    else (drug_name, zeros(n_periods))
+                    else (drug_name, np.zeros(n_periods))
                     for drug_name, individual_drug_rate in drug_amnesia_rate.items()])).cumsum()
         
-        sim_nonamnesia_reactions = pandas.DataFrame(dict([
+        sim_nonamnesia_reactions = pd.DataFrame(dict([
                     (drug_name, poisson.ppf(uuB[drug_name], individual_drug_rate)) if individual_drug_rate>0
-                    else (drug_name, zeros(n_periods))
+                    else (drug_name, np.zeros(n_periods))
                     for drug_name, individual_drug_rate in drug_nonamnesia_rate.items()])).cumsum()
         return (sim_amnesia_reactions.reindex(columns=drug_amnesia_rate.index), 
                 sim_nonamnesia_reactions.reindex(columns=drug_nonamnesia_rate.index))
@@ -495,29 +536,29 @@ def simulate_correlated_reactions(drug_amnesia_rate, drug_nonamnesia_rate, n_per
 
     
     
-def simulate_correlated_gaussian_noncum_internal(gauss_moments_df, n_periods, rho, 
-                                                 m1=None, rho1=None, rand_order=False):
-    sdvec = gauss_moments_df["sd"].values    
-    var_mat = sdvec[:, numpy.newaxis] * sdvec[numpy.newaxis, :]
-    cov_mat = toep_corr_matrix(len(gauss_moments_df), rho, m1, rho1, rand_order=rand_order) * var_mat
-    #toeplitz(rho** abs(arange(len(gauss_moments_df)))) 
-    mean_vec = gauss_moments_df["mean"].values
-    sim_values = multivariate_normal(mean=mean_vec, cov=cov_mat).rvs(size=n_periods)
-    return pandas.DataFrame(sim_values, columns = gauss_moments_df.index)
+# def simulate_correlated_gaussian_noncum_internal(gauss_moments_df, n_periods, rho, 
+#                                                  m1=None, rho1=None, rand_order=False):
+#     sdvec = gauss_moments_df["sd"].values    
+#     var_mat = sdvec[:, numpy.np.newaxis] * sdvec[numpy.np.newaxis, :]
+#     cov_mat = toep_corr_matrix(len(gauss_moments_df), rho, m1, rho1, rand_order=rand_order) * var_mat
+#     #toeplitz(rho** abs(np.arange(len(gauss_moments_df)))) 
+#     mean_vec = gauss_moments_df["mean"].values
+#     sim_values = multivariate_normal(mean=mean_vec, cov=cov_mat).rvs(size=n_periods)
+#     return pd.DataFrame(sim_values, columns = gauss_moments_df.index)
     
-def simulate_correlated_gaussian_noncum(dar, dnar, n_periods, rho, 
-                                        m1=None, rho1=None, rand_order=False):
-    return simulate_correlated_gaussian_noncum_internal(pandas.DataFrame({"mean":dar, "sd":dnar}), n_periods, rho, 
-                                                        m1=m1, rho1=rho1, rand_order=rand_order)
+# def simulate_correlated_gaussian_noncum(dar, dnar, n_periods, rho, 
+#                                         m1=None, rho1=None, rand_order=False):
+#     return simulate_correlated_gaussian_noncum_internal(pd.DataFrame({"mean":dar, "sd":dnar}), n_periods, rho, 
+#                                                         m1=m1, rho1=rho1, rand_order=rand_order)
 
 def simulate_correlated_binom(bin_props, n_periods, rho, 
                               m1=None, rho1=None, rand_order=False):    
     cov_mat = toep_corr_matrix(len(bin_props), rho, m1, rho1, rand_order=rand_order)
-    #toeplitz(rho** abs(arange(len(bin_props))))
-    #cov_mat[arange(0, N_reports, 5)[:,newaxis], arange(0, N_reports, 5)] = cov_mat[arange(0, N_reports, 5)[:,newaxis], arange(0, N_reports, 5)]**0.5
-    uuA = pandas.DataFrame(norm.cdf(multivariate_normal(cov=cov_mat).rvs(size=n_periods)), 
+    #toeplitz(rho** abs(np.arange(len(bin_props))))
+    #cov_mat[np.arange(0, N_reports, 5)[:,np.newaxis], np.arange(0, N_reports, 5)] = cov_mat[np.arange(0, N_reports, 5)[:,np.newaxis], np.arange(0, N_reports, 5)]**0.5
+    uuA = pd.DataFrame(norm.cdf(multivariate_normal(cov=cov_mat).rvs(size=n_periods)), 
                           columns = bin_props.index)
-    return pandas.DataFrame(dict([(hyp_name, binom.ppf(uuA[hyp_name], 1, hyp_prop))
+    return pd.DataFrame(dict([(hyp_name, binom.ppf(uuA[hyp_name], 1, hyp_prop))
         for hyp_name, hyp_prop in bin_props.iteritems()])).cumsum().reindex(columns=bin_props.index)
 
 def simulate_correlated_pois(pois_rates, n_periods, rho, 
@@ -525,33 +566,13 @@ def simulate_correlated_pois(pois_rates, n_periods, rho,
     
     cov_mat = toep_corr_matrix(len(pois_rates), rho, m1, rho1, 
                                rand_order=rand_order)
-    # toeplitz(rho** abs(arange(len(pois_rates))))
-    #cov_mat[arange(0, N_reports, 5)[:,newaxis], arange(0, N_reports, 5)] = cov_mat[arange(0, N_reports, 5)[:,newaxis], arange(0, N_reports, 5)]**0.5
-    uuA = pandas.DataFrame(norm.cdf(multivariate_normal(cov=cov_mat).rvs(size=n_periods)), 
+    # toeplitz(rho** abs(np.arange(len(pois_rates))))
+    #cov_mat[np.arange(0, N_reports, 5)[:,np.newaxis], np.arange(0, N_reports, 5)] = cov_mat[np.arange(0, N_reports, 5)[:,np.newaxis], np.arange(0, N_reports, 5)]**0.5
+    uuA = pd.DataFrame(norm.cdf(multivariate_normal(cov=cov_mat).rvs(size=n_periods)), 
                           columns = pois_rates.index)
-    return pandas.DataFrame(dict([(hyp_name, poisson.ppf(uuA[hyp_name], hyp_rate))
+    return pd.DataFrame(dict([(hyp_name, poisson.ppf(uuA[hyp_name], hyp_rate))
         for hyp_name, hyp_rate in pois_rates.iteritems()])).cumsum().reindex(columns=pois_rates.index)
-
-class drug_data_metadata(object):
-    def __init__(self, N_reports, N_amnesia, p0, p1, n_periods):
-        self.N_reports = N_reports 
-        self.N_amnesia = N_amnesia
-        self.p0 = p0 
-        self.p1 = p1
-        self.n_periods = n_periods
-        
-    def __str__(self):
-        outstr = ("N_reports: {0}\n"
-                  "N_amnesia: {1}\n" 
-                  "p0: {2}\n"
-                  "p1: {3}\n"
-                  "n_periods: {4}").format(self.N_reports, 
-                                           self.N_amnesia, 
-                                           self.p0, 
-                                           self.p1, 
-                                           self.n_periods)
-        return outstr
-    
+ 
 # %% streaming code
 # TODO(mhankin): make .df a reference to the updated dataframe... somehow
 class online_data(object):
@@ -559,10 +580,10 @@ class online_data(object):
     
     def __init__(self, col_list, dgp):
         self._dgp = dgp
-        if isinstance(col_list, pandas.Index):
+        if isinstance(col_list, pd.Index):
             self._columns = col_list
         else:
-            self._columns = pandas.Index(col_list)
+            self._columns = pd.Index(col_list)
             
         self._dead_cols = []
         
@@ -653,7 +674,7 @@ class infinite_dgp_wrapper(df_dgp_wrapper):
             if self._drop_old_data:
                 self._df = new_df
             else:
-                self._df = pandas.concat((self._df, new_df))
+                self._df = pd.concat((self._df, new_df))
                 self._df.reset_index(inplace=True, drop=True)
             self._iter_rows = new_df.iterrows()
             _, data_ser = next(self._iter_rows)
