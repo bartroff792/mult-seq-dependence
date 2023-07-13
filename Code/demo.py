@@ -15,7 +15,7 @@ import string
 from tqdm import tqdm
 from utils import cutoff_funcs
 from utils.cutoff_funcs import (finite_horizon_rejective_cutoffs, 
-                                create_fdr_controlled_alpha, fdr_helper)
+                                create_fdr_controlled_alpha, guo_rao_stepdown_fdr_level)
 from utils.data_funcs import (read_drug_data, simulate_reactions, assemble_llr, 
                               simulate_correlated_reactions, 
                               assemble_fake_drugs)

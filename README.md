@@ -1,6 +1,24 @@
 # Sequential Testing of Multiple Hypotheses
 Extremely broken at the moment. We're working on it!
 
+# Structure
+The only parts that are close to functional are in the Code/utils directory.
+They inlcude
+
+* `cutoff_funcs`: functions for building vectors of p-value cutoffs and log likelihood ratio cutoffs for sequential testing procedures
+* `data_funcs`: Funcs for reading drug data, generating fake data, generating hypotheses, and computing llr paths.
+* `simulation_orchestration`: This module contains functions for higher level simulation for sequential testing of multiple hypotheses (beyond just generating the observations), and executing the SPRT procedures on it.
+* `sim_analysis`: consider this broken... still trying to remember what this does. most functions are basically undocumented
+* `common_funcs`: not much other that a function for chunking lists of jobs
+
+Outside of that, the smattering of .pys in the main Code dir mostly run sets of simulations, generate plots and dump them, though they're all a mess. The only other module to look at at the moment is the `visualizations.py` module.
+
+Under `Data`, we have 
+
+* `AmnesiaRateClean.csv`: a table of drugs, each with the (annual) rate at which they've "generated" amnesia side effect reports, as well as the rate at which they've generated non-amnesia side effect reports. We recommend using their total side effect generation rate as a proxy for their usage.
+* `GoogleSearchHitData.csv`: a table of drugs search popularity, and the proportion of those searches that include "amnesia". The popularity and naming schemes of drugs differ, so some of these may be of higher than expected variance. Further, many drugs' search rates weren't available.
+* `YellowcardData.csv`: a bit too raw... contains number of total side effects, fatal side effects, amnesia reports, etc for each drug.
+
 # BL scaling
 
 
@@ -38,8 +56,6 @@ $$
 under the true distribution, regardless of the dependence structure,
 where $D\left(\vec{\alpha}\right)$ is defined as in Equation \ref{eq:fdr-d-func}.
 
-
-
 ## THM Infinite Horizon $fdr$ and $fnr$ Control
 
 The infinite horizon variant is similar, but requires slightly different
@@ -59,6 +75,7 @@ $$
 $$
 \forall i\leq m,\,j\leq m,\theta\in H_{1}^{i}\quad P_{\theta}(\exists t<\infty\text{ st }\Lambda^{i}(t)\leq B_{j}\,\cap\,\forall t^{\prime}<t\quad\Lambda^{i}(t^{\prime})<A_{1})\leq\beta_{j}
 $$
+
 provides the following bounds on type 1 and type 2 error under the
 true distribution, regardless of the dependence structure:
 
@@ -96,22 +113,23 @@ of the dependence structure:
 $$
 pfdr\leq D\left(m_{0},m_{1},\vec{\alpha}/P\left(R>0\right)\right)=D\left(m_{0},m_{1},\vec{\alpha}\right)/P\left(R>0\right).
 $$
+
 Further, we also have
 
 $$
 pfdr\leq\frac{D\left(m_{0},m_{1},\vec{\alpha}\right)}{\max_{1\leq i\leq m}P\left(\exists t<T\,\text{ st }\,\Lambda^{i}(t)\geq A_{1}\right)}\leq\frac{D\left(m_{0},m_{1},\vec{\alpha}\right)}{\min_{1\leq i\leq m}P\left(\exists t<T\,\text{ st }\,\Lambda^{i}(t)\geq A_{1}\right)}.
 $$
 
-
 ## THM: $pfdr$ and $pfnr$ Control for Infinite Horizon
-
 
 In the finite horizon, rejective procedure, the quantity $P\left(R>0\right)$
 is equivalent to 
+
 $$
-P\left(\exists i\in1,...,m,\,t<T\,\text{ st }\,\Lambda^{i}\left(t\right)\geq A_{1}\right),
+P\left(\exists i\in 1,...,m,\,t<T\,\text{ st }\,\Lambda^{i}\left(t\right)\geq A_{1}\right),
 $$
- and depends on the procedure and cutoffs. The implications of this
+
+and depends on the procedure and cutoffs. The implications of this
 theorem on determining the actual level of $pfdr$ control are discussed
 in Section \ref{subsec:pfdr-Control-Estimation}.
 
@@ -129,19 +147,18 @@ of the dependence structure:
 $$\begin{aligned}
 pfdr & \leq D\left(m_{0},m_{1},\frac{\vec{\alpha}}{P\left(R>0\right)}\right)\\
  & \leq\frac{D\left(m_{0},m_{1},\vec{\alpha}\right)}{\max_{1\leq i\leq m}P\left(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\geq A_{1},\,\forall t^{\prime}<t\,\Lambda^{i}(t^{\prime})>B_{m}\right)}\\
- & \leq\frac{D\left(m_{0},m_{1},\vec{\alpha}\right)}{P\left(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\geq A_{1},\,\forall t^{\prime}<t\,\Lambda^{i}(t^{\prime})>B_{m}\right)}\quad\forall i\in1,...,m,
+ & \leq\frac{D\left(m_{0},m_{1},\vec{\alpha}\right)}{P\left(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\geq A_{1},\,\forall t^{\prime}<t\,\Lambda^{i}(t^{\prime})>B_{m}\right)}\quad\forall i\in 1,...,m,
 \end{aligned}$$
 
 $$\begin{aligned}
 pfnr & \leq D\left(m_{1},m_{0},\frac{\vec{\beta}}{P\left(R^{\prime}>0\right)}\right)\\
  & \leq\frac{D\left(m_{1},m_{0},\vec{\beta}\right)}{\max_{1\leq i\leq m}P\left(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\leq B_{1},\,\forall t^{\prime}<t\,\Lambda^{i}(t^{\prime})<A_{m}\right)}\\
- & \leq\frac{D\left(m_{1},m_{0},\vec{\beta}\right)}{P\left(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\leq B_{1},\,\forall t^{\prime}<t\,\Lambda^{i}(t^{\prime})<A_{m}\right)}\quad\forall i\in1,...,m.
+ & \leq\frac{D\left(m_{1},m_{0},\vec{\beta}\right)}{P\left(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\leq B_{1},\,\forall t^{\prime}<t\,\Lambda^{i}(t^{\prime})<A_{m}\right)}\quad\forall i\in 1,...,m.
 \end{aligned}$$
 
 Note that in the case of a simple vs. simple SPRT with both $m_{1}>0$
 and $m_{0}>0$, we may apply Wald's approximation to the denominator
 of the bounds above
-
 
 $$
 P_{H_{0}^{i}}(\exists t<\infty\text{ st }\Lambda^{i}(t)\leq B_{1},\forall t^{\prime}<t\quad\Lambda^{i}(t^{\prime})<A_{m})\\
@@ -176,12 +193,12 @@ given the following lower-bounds on accurate rejection and acceptance
 $\forall i\leq m$:
 
 $$
-\exists i\in1,...,m,\,\text{ st }\,\forall\theta\in H_{1}^{i}\quad P_{\theta}(\exists t<\infty\text{ st }\Lambda^{i}(t)\geq A_{1},\,\Lambda^{i}(t^{\prime})>B_{m}\quad\forall t^{\prime}<t)\geq\gamma_{1}
+\exists i\in 1,...,m,\,\text{ st }\,\forall\theta\in H_{1}^{i}\quad P_{\theta}(\exists t<\infty\text{ st }\Lambda^{i}(t)\geq A_{1},\,\Lambda^{i}(t^{\prime})>B_{m}\quad\forall t^{\prime}<t)\geq\gamma_{1}
 $$
 
 
 $$
-\exists i\in1,...,m,\,\text{ st }\,\forall\theta\in H_{0}^{i}\quad P_{\theta}(\exists t<\infty\text{ st }\Lambda^{i}(t)\leq B_{1},\,\Lambda^{i}(t^{\prime})<A_{m}\quad\forall t^{\prime}<t)\geq\gamma_{0}
+\exists i\in 1,...,m,\,\text{ st }\,\forall\theta\in H_{0}^{i}\quad P_{\theta}(\exists t<\infty\text{ st }\Lambda^{i}(t)\leq B_{1},\,\Lambda^{i}(t^{\prime})<A_{m}\quad\forall t^{\prime}<t)\geq\gamma_{0}
 $$
 provides the type 1 and type 2 error bounds under the true distribution
 with $m_{0}$ true null hypotheses and $m_{1}$ false null hypotheses,
