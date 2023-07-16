@@ -88,7 +88,7 @@ def simfunc(positive_event_rate: pd.Series,
         llr = data_funcs.assemble_drug_llr((positive_events, negative_events), p0, p1)
         del positive_events
         del negative_events
-        tout = multseq.modular_sprt_test(
+        tout = multseq.msprt(
             llr, 
             A_B[0], 
             A_B[1], 
@@ -262,7 +262,7 @@ def synth_simfunc(dar: pd.Series,
                         rand_order=rand_order, cummax=cummax))
             llr = data_funcs.online_data(dar.index, dgp)
             
-            tout = multseq.modular_sprt_test(llr, A_B[0], A_B[1], record_interval=100, 
+            tout = multseq.msprt(llr, A_B[0], A_B[1], record_interval=100, 
                                              stepup=stepup, rejective=rejective, verbose=False)
             del llr
             rej_rec.append(tout[0]['drugTerminationData']["ar0"])
@@ -285,7 +285,7 @@ def synth_simfunc(dar: pd.Series,
                         rand_order=rand_order, cummax=cummax))
             llr = data_funcs.online_data(dar.index, dgp)
             
-            tout = multseq.modular_sprt_test(llr, A_B[0], A_B[1], record_interval=100, 
+            tout = multseq.msprt(llr, A_B[0], A_B[1], record_interval=100, 
                                              stepup=stepup, rejective=rejective, verbose=False)
             del llr
             dtd = tout[0]["drugTerminationData"]
@@ -636,11 +636,11 @@ def synth_data_sim(alpha=.1, beta=None, cut_type="BL", record_interval=100,
             viz_stuff = visualizations.plot_multseq_llr(llr.copy(), A_vec, B_vec, ground_truth, 
                                                     verbose=False if sim_reps else True, 
                                                     stepup=stepup, jitter_mag=.01)    
-            return (multseq.modular_sprt_test(llr, A_vec, B_vec, record_interval=100, stepup=stepup, rejective=True), 
+            return (multseq.msprt(llr, A_vec, B_vec, record_interval=100, stepup=stepup, rejective=True), 
                     llr, 
                     viz_stuff)
         else:
-            return multseq.modular_sprt_test(llr, A_vec, B_vec, record_interval=100, stepup=stepup, rejective=True), llr
+            return multseq.msprt(llr, A_vec, B_vec, record_interval=100, stepup=stepup, rejective=True), llr
         
 def compute_fdp(dtd: pd.DataFrame, ground_truth: pd.Series) -> Tuple[float, float, int, int]:
     """Computes FDP and FNP of testing procedure output.

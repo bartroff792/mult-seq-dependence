@@ -40,7 +40,7 @@ class TestMainTestProcedures(unittest.TestCase):
     # TODO: failing
     def test_modular_sprt_test_rejective(self):
         data_obj = fake_data.trickier()
-        A1, B1, C1 = multseq.modular_sprt_test(data_obj.nllr, data_obj.A_vec,
+        A1, B1, C1 = multseq.msprt(data_obj.nllr, data_obj.A_vec,
                                                data_obj.B_vec, 
                                                record_interval=1, 
                                                rejective=True)
@@ -62,7 +62,7 @@ class TestMainTestProcedures(unittest.TestCase):
         #fine_grained_outcomes, termination_time_series, cutoff_output = multseq.modular_sprt_test(nllr)
         A_vec = array([2, 1, .5, .25])
         B_vec = -array([3.0, 2.0, 1.0, .5])
-        A1, B1, C1 = multseq.modular_sprt_test(llr, A_vec, B_vec, 
+        A1, B1, C1 = multseq.msprt(llr, A_vec, B_vec, 
                                                record_interval=1)
         print "-"*5, "A1", "-"*5
         for k, v in A1.iteritems():

@@ -102,6 +102,33 @@ from scipy import stats
 FloatArray = NDArray[np.float32]
 HypTypes = Literal["drug", "pois", "binom"]
 
+# Define a type of dataframe that contains columns `alpha`, `beta`, `A`, and `B`.
+# Some of those may be full of nulls, but all should be expeted to exist?
+CutoffDF = pd.DataFrame
+def build_cutoff_df(alpha: Optional[np.ndarray]=None,
+                    beta: Optional[np.ndarray]=None,
+                    A: Optional[np.ndarray]=None,
+                    B: Optional[np.ndarray]=None,
+                    ):
+    if alpha is None and beta is None and A is None and B is None:
+        raise ValueError("must pass at least one of alpha, beta, A, and B.")
+    if alpha is not None:
+        assert np.all(alpha>0.0) and np.all(1.0>=alpha), "Alpha must be between (0,1]"
+        assert np.all(np.diff(alpha) >= 0.0), "Alpha vector is not monotone increasing."
+    if beta is not None:
+        assert np.all(beta>0.0) and np.all(1.0>=beta), "Beta must be between (0,1]"
+        assert np.all(np.diff(beta) >= 0.0), "Beta vector is not monotone increasing."
+    if A is not None:
+        assert np.all(A>0.0), "Rejection boundary As must be greater than 0."
+        assert np.all(np.diff(A) <= 0.0), "Rejection boundary As must be non-increasing."
+    if B is not None:
+        assert np.all(B<0.0), "Acceptance boundary Bs must be less than 0."
+        assert np.all(np.diff(B) >= 0.0), "Acceptance boundary Bs must be non-decreasing."
+
+    return CutoffDF({"alpha":alpha,
+                     "beta":beta,
+                     "A":A,
+                     "B":B})
 
 def guo_rao_stepdown_fdr_level(
     alpha_vec: FloatArray,
@@ -166,9 +193,8 @@ def guo_rao_stepdown_fdr_level(
     return m0 * (term1 + term2)
 
 
-def guo_rao_scaling(fdr_level, alpha_vec):
-    """
-    Returns a constanst lambda such that using cutoffs (alpha_i*lambda, ... ) control fdr at fdr_level
+def guo_rao_scaling(fdr_level: float, alpha_vec: np.ndarray) -> float:
+    """Returns a constanst lambda such that using cutoffs (alpha_i*lambda, ... ) control fdr at fdr_level
 
     Args:
         fdr_level: level at which FDR must be controlled.
@@ -301,7 +327,7 @@ def calc_bh_alpha_and_cuts(
     fdr_level: float,
     fnr_level: float,
     N_drugs: int,
-) -> Tuple[Tuple[FloatArray, FloatArray], Tuple[FloatArray, FloatArray]]:
+) -> CutoffDF:
     """Caclulates llr alpha and beta and cutoffs for sequential stepdown with BH shape alpha and beta vector.
 
     Args:
@@ -310,20 +336,18 @@ def calc_bh_alpha_and_cuts(
         `N_drugs`: number of hypothesea to test
 
     Returns:
-        2 2-tuples:
-            1. (alpha_vec, beta_vec): alpha and beta cutoffs for each drug
-            2. (alpha_cutoffs, beta_cutoffs): llr cutoffs for each drug
+        A CutoffDF with alpha, beta, A and B columns
     """
     alpha_vec = create_fdr_controlled_bh_alpha(fdr_level, N_drugs)
     beta_vec = create_fdr_controlled_bh_alpha(fnr_level, N_drugs)
-    return (alpha_vec, beta_vec), calculate_mult_sprt_cutoffs(alpha_vec, beta_vec)
+    return calculate_mult_sprt_cutoffs(alpha_vec, beta_vec)
 
 
 def calc_bl_alpha_and_cuts(
     fdr_level: float,
     fnr_level: float,
     N_drugs: int,
-) -> Tuple[Tuple[FloatArray, FloatArray], Tuple[FloatArray, FloatArray]]:
+) -> CutoffDF:
     """Caclulates llr alpha and beta and cutoffs for sequential stepdown with BL shape alpha and beta vector.
 
     Args:
@@ -338,7 +362,7 @@ def calc_bl_alpha_and_cuts(
     """
     alpha_vec = create_fdr_controlled_bl_alpha(fdr_level, N_drugs)
     beta_vec = create_fdr_controlled_bl_alpha(fnr_level, N_drugs)
-    return (alpha_vec, beta_vec), calculate_mult_sprt_cutoffs(alpha_vec, beta_vec)
+    return calculate_mult_sprt_cutoffs(alpha_vec, beta_vec)
 
 
 def cutoff_truncation(cut_vec: FloatArray) -> FloatArray:
@@ -360,7 +384,7 @@ def calculate_mult_sprt_cutoffs(
     beta_vec: FloatArray,
     rho: float = 0.583,
     do_trunc: bool = True,
-) -> Tuple[FloatArray, FloatArray]:
+) -> CutoffDF:
     """Uses Wald approx to calculate llr cutoffs from type 1 and 2 error thresholds.
     A > 0 > B
     Reject H0 when Lambda > A
@@ -372,9 +396,10 @@ def calculate_mult_sprt_cutoffs(
         rho: scalar adjustment factor for the Wald approximations.
 
     Returns:
-        2-tuple of vectors A_vec and B_vec
-        A_vec: positive, increasing rejection cutoffs **for log likelihood ratio**
-        B_vec: negative, decreasing acceptance cutoffs **for log likelihood ratio**
+        CutoffDF with columns alpha, beta, A, and B.
+        A: positive, increasing rejection cutoffs **for log likelihood ratio**
+        B: negative, decreasing acceptance cutoffs **for log likelihood ratio**
+        alpha and beta: (0,1] increasing pvalue cutoffs
     """
     alpha1 = alpha_vec[0]
     beta1 = beta_vec[0]
@@ -409,11 +434,11 @@ def calculate_mult_sprt_cutoffs(
             B_vec = -cutoff_truncation(-B_vec)
     assert np.diff(A_vec).max() < 0, "A_vec is non-decreasing"
     assert np.diff(B_vec).min() > 0, "B_vec is non-increasing"
-    return A_vec, B_vec
+    return build_cutoff_df(alpha=alpha_vec, beta=beta_vec, A=A_vec, B=B_vec)
 
 
 # TODO: fix this. calculating for reversed statistics
-def get_pvalue_cutoffs(A_vec, B_vec, rho=0.583):
+def get_pvalue_cutoffs(A_vec:np.ndarray, B_vec:np.ndarray, rho=0.583) -> CutoffDF:
     """Inverts Wald approx to get type 1/2 error cutoffs from llr cutoffs."""
     alpha_vec = np.zeros(A_vec.shape)
     beta_vec = np.zeros(B_vec.shape)
@@ -430,7 +455,7 @@ def get_pvalue_cutoffs(A_vec, B_vec, rho=0.583):
     beta_vec[1:] = (1 - highest_sig.sum()) / (
         (1 - highest_sig[1]) * np.exp(-A_vec[1:] + rho) - highest_sig[0]
     )
-    return alpha_vec, beta_vec
+    return build_cutoff_df(alpha=alpha_vec, beta=beta_vec, A=A_vec, B=B_vec)
 
 
 # TODO: fix this. calculating for reversed statistics
@@ -439,7 +464,7 @@ def pfdr_pfnr_cutoffs(
     beta_raw_vec: FloatArray,
     pfdr: float,
     pfnr: float,
-    m0: int,
+    m0: Optional[int] = None,
     epsilon: float = 10.0**-8,
 ) -> Tuple[FloatArray, FloatArray]:
     """pFDR and pFNR controlled pvalue cutoffs for infinite horizon sequential stepdown.
@@ -1066,17 +1091,17 @@ def llr_term_moments(drr: pd.Series, p0: float, p1: float) -> pd.DataFrame:
     return pd.DataFrame({"term_mean": term_mean, "term_var": term_var})
 
 
-def llr_binom_term_moments(p0: float, p1: float) -> pd.Series:
+def llr_binom_term_moments(p0: pd.Series, p1: pd.Series) -> pd.DataFrame:
     """Calculates mean and variance of single-example binomial llr terms.
 
     Args:
-        p0 (float): null hypothesis probability.
-        p1 (float): alternative hypothesis probability.
+        p0 (pd.Series): null hypothesis probability.
+        p1 (pd.Series): alternative hypothesis probability.
 
     Returns:
-        pd.Series: contains two terms:
-            team_mean: mean of the llr term.
-            term_var: variance of the llr term.
+        pd.DataFrame: contains two columns:
+            team_mean: mean of the llr terms.
+            term_var: variance of the llr terms.
     """
     const_a = np.log((1 - p1) / (1 - p0))
     const_b = np.log(p1 / p0) - np.log((1 - p1) / (1 - p0))
@@ -1084,20 +1109,20 @@ def llr_binom_term_moments(p0: float, p1: float) -> pd.Series:
     varX = p0 * (1 - p0)
     term_mean = const_a + const_b * eX
     term_var = (const_b**2.0) * varX
-    return pd.Series({"term_mean": term_mean, "term_var": term_var})
+    return pd.DataFrame({"term_mean": term_mean, "term_var": term_var})
 
 
-def llr_pois_term_moments(lam0:float, lam1:float) -> pd.Series:
+def llr_pois_term_moments(lam0:pd.Series, lam1:pd.Series) -> pd.DataFrame:
     """Calculates mean and variance of one step for a poisson llr.
 
     Args:
-        lam0 (float): null hypothesis rate.
-        lam1 (float): alternative hypothesis rate.
+        lam0 (pd.Series): null hypothesis rate.
+        lam1 (pd.Series): alternative hypothesis rate.
 
     Returns:
-        pd.Series: contains two terms:
-            team_mean: mean of the llr term.
-            term_var: variance of the llr term.
+        pd.DataFrame: contains two columns:
+            team_mean: mean of the llr terms.
+            term_var: variance of the llr terms.
     """
     const_a = -(lam1 - lam0)
     const_b = np.log(lam1 / lam0)
@@ -1105,7 +1130,7 @@ def llr_pois_term_moments(lam0:float, lam1:float) -> pd.Series:
     varX = lam0
     term_mean = const_a + const_b * eX
     term_var = (const_b**2.0) * varX
-    return pd.Series({"term_mean": term_mean, "term_var": term_var})
+    return pd.DataFrame({"term_mean": term_mean, "term_var": term_var})
 
 
 # Var(aX+bY) = a**2 VarX + b**2 VarY + 2ab CovXY
@@ -1166,6 +1191,13 @@ def est_sample_size(
 ) -> int:
     """Estimate the sample size needed to accept or reject all hypotheses.
 
+    in general, very conservative. Calculates expected rejection and 
+    acceptance times for the worst case cutoffs and worst case
+    hypotheses, then takes the worst of the two. The expectation could 
+    be misleading, but given the pairing of worst case hypothesis with
+    worst case cutoff, unlikely to underestimate.
+
+
     Args:
         A_vec (np.array):   A_vec[i] is the rejective?? cutoff for the ith hypothesis
         B_vec (np.array):   B_vec[i] is the acceptive?? cutoff for the ith hypothesis
@@ -1178,24 +1210,23 @@ def est_sample_size(
         int: The estimated sample size needed to accept or reject all hypotheses
     """
     if (hyp_type is None) or (hyp_type == "drug"):
-        # Why mins for both???
-        # TODO: either a bug or something I don't understand.
         negative_drift_under_null = llr_term_moments(drr, p0, p1)["term_mean"]
         positive_drift_under_alt = -llr_term_moments(drr, p1, p0)["term_mean"]
-        # Get slowest drifting hypotheses, ie worst case.
-        mu_0 = (negative_drift_under_null).max()
-        mu_1 = (positive_drift_under_alt).min()
     elif hyp_type == "pois":
-        mu_0 = llr_pois_term_moments(p0, p1)["term_mean"]
-        mu_1 = llr_pois_term_moments(p1, p0)["term_mean"]
+        negative_drift_under_null = llr_pois_term_moments(p0, p1)["term_mean"]
+        positive_drift_under_alt = -llr_pois_term_moments(p1, p0)["term_mean"]
     elif hyp_type == "binom":
-        mu_0 = llr_binom_term_moments(p0, p1)["term_mean"]
-        mu_1 = llr_binom_term_moments(p1, p0)["term_mean"]
+        negative_drift_under_null = llr_binom_term_moments(p0, p1)["term_mean"]
+        positive_drift_under_alt = -llr_binom_term_moments(p1, p0)["term_mean"]
     else:
         raise ValueError("Unknown type {0}".format(hyp_type))
-
+    # Get slowest drifting hypotheses, ie worst case.
+    mu_0 = (negative_drift_under_null).max()
+    mu_1 = (positive_drift_under_alt).min()
+    # Get the most extreme cutoffs
     most_extreme_rej_cutoff = A_vec[0]
     most_extreme_acc_cutoff = B_vec[0]
+    # Get expected stopping time for absolute worst case rej and acc
     max_expected_acceptance_time = single_hyp_sequential_expected_acceptance_time(
         most_extreme_rej_cutoff, 
         most_extreme_acc_cutoff, 
@@ -1206,7 +1237,7 @@ def est_sample_size(
         most_extreme_acc_cutoff, 
         mu_0,
         )
-    
+    # Take the worst of those. 
     return max((max_expected_acceptance_time, max_expected_rejection_time))
 
 

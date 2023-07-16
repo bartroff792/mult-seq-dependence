@@ -158,7 +158,7 @@ def plot_multseq_llr(llr, A_vec, B_vec, ground_truth=None, title=None, verbose=T
     # Rejective only
     rejective = B_vec is None
         
-    fake_drug_outcomes, _ = multseq.modular_sprt_test(llr, A_vec, B_vec, rejective=rejective, verbose=verbose, stepup=stepup)
+    fake_drug_outcomes, _ = multseq.msprt(llr, A_vec, B_vec, rejective=rejective, verbose=verbose, stepup=stepup)
     if stat_data_func is not None:
         llr = stat_data_func()
     fig = plt.figure(figsize=(12,8))
