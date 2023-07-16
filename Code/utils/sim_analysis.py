@@ -1,27 +1,18 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Created on Wed Feb  8 15:03:03 2017
 
 @author: mhankin
 """
-from pylab import *
-from scipy.stats import binom, poisson
 from scipy.special import factorial
-#from .. import multseq
+
 import multseq
-#from ..multseq import step_down_elimination
+
 print(multseq.__file__)
 from multseq import step_down_elimination, step_up_elimination
-from .data_funcs import (assemble_fake_drugs, simulate_correlated_reactions, assemble_llr,
-                              assemble_fake_binom, simulate_correlated_binom, assemble_binom_llr,
-                              assemble_fake_pois, simulate_correlated_pois, assemble_pois_llr)
-from .cutoff_funcs import (create_fdr_controlled_alpha, llr_term_moments, llr_binom_term_moments, 
-                                llr_pois_term_moments)
 from . import cutoff_funcs
 from . import data_funcs
-from scipy.stats import norm as normal_var
-import pandas
+from scipy import stats
+import pandas as pd
 import tqdm
 import os
 import seaborn as sns
@@ -45,31 +36,31 @@ reps_per_period_point = 500
 #scale_fdr=True
 #max_magnitude = 4.0
 
-def single_binom_test(x, n, p0, p1, halfp=False):
+def single_binom_test(x, n:int, p0:float, p1:float, halfp:bool=False):
     if p1>p0:
         if halfp:
-            return (1 - .5 * binom.cdf(x-1, n, p0) - .5 * binom.cdf(x, n, p0))
+            return (1 - .5 * stats.binomcdf(x-1, n, p0) - .5 * stats.binomcdf(x, n, p0))
         else:
-            return (1 - binom.cdf(x-1, n, p0))
+            return (1 - stats.binomcdf(x-1, n, p0))
     else:
         # p1 < p0
         if halfp:
-            return (.5 * binom.cdf(x, n, p0) + .5 * binom.cdf(x-1, n, p0))
+            return (.5 * stats.binomcdf(x, n, p0) + .5 * stats.binomcdf(x-1, n, p0))
         else:
-            return binom.cdf(x, n, p0)
+            return stats.binomcdf(x, n, p0)
     
 def single_pois_test(x, lam0, lam1, halfp=False):
     if lam1>lam0:
         if halfp:
-            return (1 - .5 * poisson.cdf(x-1, lam0) - .5 * poisson.cdf(x, lam0))
+            return (1 - .5 * stats.poisson.cdf(x-1, lam0) - .5 * stats.poisson.cdf(x, lam0))
         else:
-            return (1 - poisson.cdf(x-1, lam0))
+            return (1 - stats.poisson.cdf(x-1, lam0))
     else:
         # p1 < p0
         if halfp:
-            return (.5 * poisson.cdf(x, lam0) + .5 * poisson.cdf(x-1, lam0))
+            return (.5 * stats.poisson.cdf(x, lam0) + .5 * stats.poisson.cdf(x-1, lam0))
         else:
-            return poisson.cdf(x, lam0)
+            return stats.poisson.cdf(x, lam0)
         
 def single_test(x, param0, param1, prod_dist, param_comparison, halfp=False):
     if param_comparison(param0, param1):
@@ -92,9 +83,9 @@ def mixed_test_points(low, high, num, mix=.7):
     
     log_num = int(ceil(mix * num))
     lin_num = int(ceil((1.0 - mix) * num)) + 2
-    lin_list = linspace(low, high, lin_num)[1:-1].tolist()
+    lin_list = np.linspace(low, high, lin_num)[1:-1].tolist()
     log_list = logspace(log10(low), log10(high), log_num).tolist()
-    full_ar = array(lin_list + log_list)
+    full_ar = np.array(lin_list + log_list)
     full_ar.sort()
     return full_ar.astype(int)
     
@@ -119,7 +110,7 @@ def get_oc_range_wrapper(p0, p1,
     
     """
 
-#     n_period_vec = (base_periods * (2.0 ** linspace(0.0, period_max_exp, period_test_points))).astype(int)
+#     n_period_vec = (base_periods * (2.0 ** np.linspace(0.0, period_max_exp, period_test_points))).astype(int)
     n_period_vec = mixed_test_points(low_sample, high_sample, period_test_points)
     return get_oc_range(p0, p1, 
                         alpha = alpha, 
@@ -135,26 +126,26 @@ def get_oc_range_wrapper(p0, p1,
 def fixed_sample_pval(hyp_type, dar, dnar, drr, rho, p0, p1, n_periods, halfp):
                 # Generate data
     if (hyp_type is None) or (hyp_type=="drug"):
-        amnesia_ts, nonamnesia_ts = simulate_correlated_reactions(n_periods * dar, n_periods * dnar, 2, rho, halfp)
-        llr_ts = assemble_llr(amnesia_ts, nonamnesia_ts, p0, p1)
+        amnesia_ts, nonamnesia_ts = data_funcs.simulate_correlated_reactions(n_periods * dar, n_periods * dnar, 2, rho, halfp)
+        llr_ts = data_funcs.assemble_llr(amnesia_ts, nonamnesia_ts, p0, p1)
         llr = llr_ts.iloc[-1]
         amnesia = amnesia_ts.iloc[0]
         tot_reacts = nonamnesia_ts.iloc[0] + amnesia
-        nrm_approx = llr_term_moments(drr, p0, p1) * n_periods
+        nrm_approx = cutoff_funcs.llr_term_moments(drr, p0, p1) * n_periods
 
-        Z_scores = (llr - nrm_approx["term_mean"]) / sqrt(nrm_approx["term_var"])
-        p_val = pandas.Series(1 - normal_var.cdf(Z_scores), index=dar.index)
+        Z_scores = (llr - nrm_approx["term_mean"]) / np.sqrt(nrm_approx["term_var"])
+        p_val = pd.Series(1 - stats.norm.cdf(Z_scores), index=dar.index)
     elif hyp_type == "binom":
         amnesia_ts = data_funcs.simulate_correlated_binom(dar, n_periods, rho)
-        amnesia = pandas.DataFrame(amnesia_ts).iloc[-1]
-        p_val = pandas.Series(dict([(drug_name, single_binom_test(amnesia_val, n_periods, p0, p1, halfp=halfp)) for drug_name, amnesia_val in amnesia.items()]))
+        amnesia = pd.DataFrame(amnesia_ts).iloc[-1]
+        p_val = pd.Series(dict([(drug_name, single_binom_test(amnesia_val, n_periods, p0, p1, halfp=halfp)) for drug_name, amnesia_val in amnesia.items()]))
         #llr = data_funcs.assemble_binom_llr(amnesia, p0, p1).iloc[0]
         #nrm_approx = llr_binom_term_moments(p0, p1) * n_periods
     elif hyp_type == "pois":
         amnesia_ts = data_funcs.simulate_correlated_pois(dar, n_periods, rho)
-        amnesia = pandas.DataFrame(amnesia_ts).iloc[-1]
+        amnesia = pd.DataFrame(amnesia_ts).iloc[-1]
         
-        p_val = pandas.Series(dict([(drug_name, single_pois_test(amnesia_val, n_periods * p0, n_periods * p1, halfp=halfp)) for drug_name, amnesia_val in amnesia.items()]))
+        p_val = pd.Series(dict([(drug_name, single_pois_test(amnesia_val, n_periods * p0, n_periods * p1, halfp=halfp)) for drug_name, amnesia_val in amnesia.items()]))
         
         #llr = data_funcs.assemble_pois_llr(amnesia, p0, p1).iloc[0]
         #nrm_approx = llr_pois_term_moments(p0, p1) * n_periods
@@ -187,15 +178,15 @@ def get_oc_range(p0, p1,
     if (hyp_type is None) or (hyp_type=="drug"):
         if m_alt:
             raise ValueError("m_alt for drugs...")
-        dar, dnar, ground_truth = assemble_fake_drugs(max_magnitude, m_null, False, p0, p1)
+        dar, dnar, ground_truth = data_funcs.assemble_fake_drugs(max_magnitude, m_null, False, p0, p1)
         drr = dar + dnar
     elif hyp_type == "binom":
-        dar, ground_truth = assemble_fake_binom(m_null, False, p0, p1, m_alt=m_alt)
-        drr = pandas.Series(ones(len(dar)), index=dar.index)
+        dar, ground_truth = data_funcs.assemble_fake_binom(m_null, False, p0, p1, m_alt=m_alt)
+        drr = pd.Series(ones(len(dar)), index=dar.index)
         dnar = None
     elif hyp_type == "pois":
-        dar, ground_truth = assemble_fake_pois(m_null, False, p0, p1, m_alt=m_alt)
-        drr = pandas.Series(ones(len(dar)), index=dar.index)
+        dar, ground_truth = data_funcs.assemble_fake_pois(m_null, False, p0, p1, m_alt=m_alt)
+        drr = pd.Series(ones(len(dar)), index=dar.index)
         dnar = None
     else:
         raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
@@ -216,7 +207,7 @@ def get_oc_range(p0, p1,
         
     if scale_fdr:
         if stepup:
-            scaled_alpha_vec = alpha_vec_raw / log(m_hyps)
+            scaled_alpha_vec = alpha_vec_raw / np.log(m_hyps)
         else:
 #            if m0_known:
 #                scaled_alpha_vec = alpha * alpha_vec_raw / cutoff_funcs.fdr_helper(alpha_vec_raw, m_total)
@@ -258,8 +249,8 @@ def get_oc_range(p0, p1,
         reps_list.append(reps_per_period_point_ish)
         if dbg:
             
-            rej_rec = pandas.DataFrame(zeros((reps_per_period_point_ish, (m_null + m_alt))).astype(float), columns=dar.index)
-            pval_rec = pandas.DataFrame(zeros((reps_per_period_point_ish, (m_null + m_alt))).astype(float), columns=dar.index)
+            rej_rec = pd.DataFrame(zeros((reps_per_period_point_ish, (m_null + m_alt))).astype(float), columns=dar.index)
+            pval_rec = pd.DataFrame(zeros((reps_per_period_point_ish, (m_null + m_alt))).astype(float), columns=dar.index)
         
         fdp_rec = zeros(reps_per_period_point_ish)
         fnp_rec = zeros(reps_per_period_point_ish)
@@ -303,19 +294,19 @@ def get_oc_range(p0, p1,
         
         
     if dbg:
-        return (pandas.DataFrame({"fdr":fdr_vec, "fnr":fnr_vec, 
+        return (pd.DataFrame({"fdr":fdr_vec, "fnr":fnr_vec, 
                                  "pfdr":pfdr_vec, "pfnr":pfnr_vec, 
-                                 "fdr_sd":sqrt(fdr_var_vec), "fnr_sd":sqrt(fnr_var_vec), 
-                                 "pfdr_sd":sqrt(pfdr_var_vec), "pfnr_sd":sqrt(pfnr_var_vec), 
-                                 "logfdr":log(fdr_vec), "logfnr":log(fnr_vec), 
+                                 "fdr_sd":np.sqrt(fdr_var_vec), "fnr_sd":np.sqrt(fnr_var_vec), 
+                                 "pfdr_sd":np.sqrt(pfdr_var_vec), "pfnr_sd":np.sqrt(pfnr_var_vec), 
+                                 "logfdr":np.log(fdr_vec), "logfnr":np.log(fnr_vec), 
                                  "samplesize":n_period_vec,
                                  "reps":reps_list}), dbg_record)
     else:
-        return pandas.DataFrame({"fdr":fdr_vec, "fnr":fnr_vec, 
+        return pd.DataFrame({"fdr":fdr_vec, "fnr":fnr_vec, 
                                  "pfdr":pfdr_vec, "pfnr":pfnr_vec, 
-                                 "fdr_sd":sqrt(fdr_var_vec), "fnr_sd":sqrt(fnr_var_vec), 
-                                 "pfdr_sd":sqrt(pfdr_var_vec), "pfnr_sd":sqrt(pfnr_var_vec), 
-                                 "logfdr":log(fdr_vec), "logfnr":log(fnr_vec), 
+                                 "fdr_sd":np.sqrt(fdr_var_vec), "fnr_sd":np.sqrt(fnr_var_vec), 
+                                 "pfdr_sd":np.sqrt(pfdr_var_vec), "pfnr_sd":np.sqrt(pfnr_var_vec), 
+                                 "logfdr":np.log(fdr_vec), "logfnr":np.log(fnr_vec), 
                                  "samplesize":n_period_vec,
                                  "reps":reps_list})
     
@@ -325,10 +316,10 @@ def error_plots(oc_df, n_se = 2.0, nominal_fdr = .25, main_title = "Poisson (5,5
     colors = sns.color_palette()
     fdr_color = colors[0]
     fnr_color = colors[1]
-    oc_df["pfdr_se"] = n_se*oc_df["pfdr_sd"] / sqrt(oc_df["reps"])
-    oc_df["pfnr_se"] = n_se*oc_df["pfnr_sd"] / sqrt(oc_df["reps"])
-    oc_df["fdr_se"] = n_se*oc_df["fdr_sd"] / sqrt(oc_df["reps"])
-    oc_df["fnr_se"] = n_se*oc_df["fnr_sd"] / sqrt(oc_df["reps"])
+    oc_df["pfdr_se"] = n_se*oc_df["pfdr_sd"] / np.sqrt(oc_df["reps"])
+    oc_df["pfnr_se"] = n_se*oc_df["pfnr_sd"] / np.sqrt(oc_df["reps"])
+    oc_df["fdr_se"] = n_se*oc_df["fdr_sd"] / np.sqrt(oc_df["reps"])
+    oc_df["fnr_se"] = n_se*oc_df["fnr_sd"] / np.sqrt(oc_df["reps"])
 
     error_fig, error_axes = subplots(1, 2)
     fdr_fnr_ax, pfdr_pfnr_ax = error_axes
@@ -378,7 +369,7 @@ def est_equiv_sample_size(alpha, hyp_type, p0, p1, m_null,
         
     # Perform regression to estimate equivalent sample size
     ols_result = sm.ols(formula="logfnr ~ 1 + samplesize", data=oc_range).fit().params
-    regression_estimates = pandas.Series({"gen":(seqlogfnr_gen - ols_result["Intercept"]) / ols_result["samplesize"], 
+    regression_estimates = pd.Series({"gen":(seqlogfnr_gen - ols_result["Intercept"]) / ols_result["samplesize"], 
                           #"rej":(seqlogfnr_rej - ols_result["Intercept"]) / ols_result["samplesize"],
                           "gen_nominal":(seqlogfnr_gen_nominal - ols_result["Intercept"]) / ols_result["samplesize"]}) 
     
@@ -395,18 +386,18 @@ def est_equiv_sample_size(alpha, hyp_type, p0, p1, m_null,
                                     m_null=m_null, m_alt=m_alt, rho=rho,
                                 cut_type=cut_type, scale_fdr=scale_fdr)
             
-            oc_range = pandas.concat((oc_range, narrow_oc_range, narrow_oc_range_nominal)).sort_values("samplesize").reset_index(drop=True)
+            oc_range = pd.concat((oc_range, narrow_oc_range, narrow_oc_range_nominal)).sort_values("samplesize").reset_index(drop=True)
             idx_min_nominal = abs(oc_range["logfnr"] - seqlogfnr_gen_nominal).argmin()
             idx_min = abs(oc_range["logfnr"] - seqlogfnr_gen).argmin()
-#            fine_est = pandas.Series({"gen":int(oc_range.loc[idx_min, "samplesize"]),
+#            fine_est = pd.Series({"gen":int(oc_range.loc[idx_min, "samplesize"]),
 #                                                "gen_nominal":int(oc_range.loc[idx_min_nominal, "samplesize"])})
-            fine_est = pandas.DataFrame({"gen":oc_range.loc[idx_min, :],
+            fine_est = pd.DataFrame({"gen":oc_range.loc[idx_min, :],
                                                 "gen_nominal":oc_range.loc[idx_min_nominal, :]})
         else:
-            oc_range = pandas.concat((oc_range, narrow_oc_range)).sort_values("samplesize").reset_index(drop=True)
+            oc_range = pd.concat((oc_range, narrow_oc_range)).sort_values("samplesize").reset_index(drop=True)
             idx_min = abs(oc_range["logfnr"] - seqlogfnr_gen).argmin()
             
-            fine_est = pandas.Series(oc_range.loc[idx_min, :])
+            fine_est = pd.Series(oc_range.loc[idx_min, :])
         
 
 
@@ -428,7 +419,7 @@ def get_ave_samp_ser(fullrec, hyp_type, m0, rejective=True):
     """ For infinite horizon, build series before matching"""
     if rejective:
         term_time = fullrec[hyp_type].fillna(fullrec["Horizon"])
-        rej_ser = pandas.Series({
+        rej_ser = pd.Series({
                      "H0 ASN":term_time.iloc[:,:m0].mean().mean(),
                      "Ha ASN":term_time.iloc[:,m0:].mean().mean(),
                      "Seq Achieved FDR":fullrec["FDR"][hyp_type]["rej_FDR"],
@@ -438,18 +429,18 @@ def get_ave_samp_ser(fullrec, hyp_type, m0, rejective=True):
                      "Nominal FDR":fullrec["config"].getfloat("alpha_rejective"),
                      "Horizon":fullrec["Horizon"]})
         if "rej_FDRse" in fullrec["FDR"][hyp_type]:
-            se_ser = pandas.Series({"Seq FDR se":fullrec["FDR"][hyp_type]["rej_FDRse"],
+            se_ser = pd.Series({"Seq FDR se":fullrec["FDR"][hyp_type]["rej_FDRse"],
                      "Seq FNR se":fullrec["FDR"][hyp_type]["rej_FNRse"],
                      "Seq pFDR se":fullrec["FDR"][hyp_type]["rej_pFDRse"],
                      "Seq pFNR se":fullrec["FDR"][hyp_type]["rej_pFNRse"]})
-            rej_ser = pandas.concat((rej_ser, se_ser))
-#        rej_ser = pandas.concat((rej_ser, fullrec[hyp_type].mean(),
+            rej_ser = pd.concat((rej_ser, se_ser))
+#        rej_ser = pd.concat((rej_ser, fullrec[hyp_type].mean(),
 #                                 (fullrec[hyp_type]<50).mean()))
 #        print(fullrec[hyp_type])
 #        raise Exception()
         return rej_ser
     else:
-        gen_ser =  pandas.Series({
+        gen_ser =  pd.Series({
                      "H0 ASN":fullrec[hyp_type].iloc[:,:m0].mean().mean(),
                      "Ha ASN":fullrec[hyp_type].iloc[:,m0:].mean().mean(),
                      "Seq Achieved FDR":fullrec["FDR"][hyp_type]["gen_FDR"],
@@ -457,11 +448,11 @@ def get_ave_samp_ser(fullrec, hyp_type, m0, rejective=True):
                      "Nominal FDR":fullrec["config"].getfloat("alpha_general"),
                      "Nominal FNR":fullrec["config"].getfloat("beta_general")})
         if "gen_FDRse" in fullrec["FDR"][hyp_type]:
-            se_ser = pandas.Series({"Seq FDR se":fullrec["FDR"][hyp_type]["gen_FDRse"],
+            se_ser = pd.Series({"Seq FDR se":fullrec["FDR"][hyp_type]["gen_FDRse"],
                      "Seq FNR se":fullrec["FDR"][hyp_type]["gen_FNRse"],
                      "Seq pFDR se":fullrec["FDR"][hyp_type]["gen_pFDRse"],
                      "Seq pFNR se":fullrec["FDR"][hyp_type]["gen_pFNRse"]})
-            gen_ser = pandas.concat((gen_ser, se_ser))
+            gen_ser = pd.concat((gen_ser, se_ser))
         return gen_ser
     
     
@@ -507,10 +498,10 @@ def build_fs_metric_ser(fdp_ser, fnp_ser):
     pfdr_var = fdp_ser[fdp_ser > 0].var()
     pfnr_var = fnp_ser[fnp_ser > 0].var()
     
-    fdr_se = sqrt(fdr_var / len(fdp_ser))
-    fnr_se = sqrt(fnr_var / len(fnp_ser))
-    pfdr_se = sqrt(pfdr_var / sum(fdp_ser>0))
-    pfnr_se = sqrt(pfnr_var / sum(fnp_ser>0))
+    fdr_se = np.sqrt(fdr_var / len(fdp_ser))
+    fnr_se = np.sqrt(fnr_var / len(fnp_ser))
+    pfdr_se = np.sqrt(pfdr_var / sum(fdp_ser>0))
+    pfnr_se = np.sqrt(pfnr_var / sum(fnp_ser>0))
     
     
     fdr = fdp_ser.mean()
@@ -518,11 +509,11 @@ def build_fs_metric_ser(fdp_ser, fnp_ser):
     pfdr = fdp_ser[fdp_ser > 0].mean()
     pfnr = fnp_ser[fnp_ser > 0].mean()
     
-    metric_ser = pandas.Series({"fdr":fdr, "fnr":fnr, 
+    metric_ser = pd.Series({"fdr":fdr, "fnr":fnr, 
                                  "pfdr":pfdr, "pfnr":pfnr, 
                                  "fdr_se":fdr_se, "fnr_se":fnr_se, 
                                  "pfdr_se":pfdr_se, "pfnr_se":pfnr_se, 
-                                 "logfdr":log(fdr), "logfnr":log(fnr)})
+                                 "logfdr":np.log(fdr), "logfnr":np.log(fnr)})
     return metric_ser
 
 def finite_horizon_equivalent_oc(shfp, cfgfp, cfgsect, n_reps=100, halfp=True):
@@ -557,7 +548,7 @@ def finite_horizon_equivalent_oc(shfp, cfgfp, cfgsect, n_reps=100, halfp=True):
         
     if scale_fdr:
         if stepup:
-            scaled_alpha_vec = alpha_vec_raw / log(m_hyps)
+            scaled_alpha_vec = alpha_vec_raw / np.log(m_hyps)
         else:
 #            if m0_known:
 #                scaled_alpha_vec = alpha * alpha_vec_raw / cutoff_funcs.fdr_helper(alpha_vec_raw, m_total)
@@ -574,8 +565,8 @@ def finite_horizon_equivalent_oc(shfp, cfgfp, cfgsect, n_reps=100, halfp=True):
     fnp_rec_pois_unscaled = zeros(n_reps, float)
     lam0 = fullrec["config"].getfloat("lam0")
     lam1 = fullrec["config"].getfloat("lam1")
-    dar, ground_truth = assemble_fake_pois(m0, False, lam0, lam1, m_alt=m1)
-    drr = pandas.Series(ones(len(dar)), index=dar.index)
+    dar, ground_truth = data_funcs.assemble_fake_pois(m0, False, lam0, lam1, m_alt=m1)
+    drr = pd.Series(ones(len(dar)), index=dar.index)
     dnar = None
     for i in tqdm.tqdm(range(n_reps), "pois FH reps"):
         p_val = fixed_sample_pval("pois", dar, dnar, drr, rho, lam0, lam1, n_periods, halfp)
@@ -600,11 +591,11 @@ def finite_horizon_equivalent_oc(shfp, cfgfp, cfgsect, n_reps=100, halfp=True):
      
     pois_ser = build_fs_metric_ser(fdp_rec_pois, fnp_rec_pois)
     pois_ser.index = map(lambda metric: "fs_"+metric, pois_ser.index)
-    pois_ser = pandas.concat((pois_ser, fullrec["ave_samp_pois"]))
+    pois_ser = pd.concat((pois_ser, fullrec["ave_samp_pois"]))
 
     pois_unscaled_ser = build_fs_metric_ser(fdp_rec_pois_unscaled, fnp_rec_pois_unscaled)
     pois_unscaled_ser.index = map(lambda metric: "fs_"+metric, pois_unscaled_ser.index)
-    pois_unscaled_ser = pandas.concat((pois_unscaled_ser, fullrec["ave_samp_pois_unscaled"]))
+    pois_unscaled_ser = pd.concat((pois_unscaled_ser, fullrec["ave_samp_pois_unscaled"]))
 
 
 
@@ -613,8 +604,8 @@ def finite_horizon_equivalent_oc(shfp, cfgfp, cfgsect, n_reps=100, halfp=True):
     fnp_rec_binom = zeros(n_reps, float)
     p0 = fullrec["config"].getfloat("p0")
     p1 = fullrec["config"].getfloat("p1")
-    dar, ground_truth = assemble_fake_binom(m0, False, p0, p1, m_alt=m1)
-    drr = pandas.Series(ones(len(dar)), index=dar.index)
+    dar, ground_truth = data_funcs.assemble_fake_binom(m0, False, p0, p1, m_alt=m1)
+    drr = pd.Series(ones(len(dar)), index=dar.index)
     dnar = None
     for i in tqdm.tqdm(range(n_reps), "binom FH reps"):
         p_val = fixed_sample_pval("binom", dar, dnar, drr, rho, p0, p1, n_periods, halfp)
@@ -635,7 +626,7 @@ def finite_horizon_equivalent_oc(shfp, cfgfp, cfgsect, n_reps=100, halfp=True):
 
     binom_ser =  build_fs_metric_ser(fdp_rec_binom, fnp_rec_binom)
     binom_ser.index = map(lambda metric: "fs_"+metric, binom_ser.index)
-    binom_ser = pandas.concat((binom_ser, fullrec["ave_samp_binom"]))
+    binom_ser = pd.concat((binom_ser, fullrec["ave_samp_binom"]))
         
     print(cfgsect, pois_ser)
 
@@ -663,9 +654,9 @@ def infinite_horizon_equivalent(shfp, cfgfp,  cfgsect, do_exact=False, dbg=False
                           p1=fullrec["config"].getfloat("lam1"),
                           m_null=fullrec["m0"], m_alt=fullrec["m1"], 
                           low_sample=10, high_sample=125,
-                          seqlogfnr_gen=log(fullrec["FDR"]["pois"]["gen_FNR"]), 
-                          seqlogfnr_rej=log(fullrec["FDR"]["pois"]["rej_FNR"]), 
-                          seqlogfnr_gen_nominal=log(fullrec["config"].getfloat("beta_general")),
+                          seqlogfnr_gen=np.log(fullrec["FDR"]["pois"]["gen_FNR"]), 
+                          seqlogfnr_rej=np.log(fullrec["FDR"]["pois"]["rej_FNR"]), 
+                          seqlogfnr_gen_nominal=np.log(fullrec["config"].getfloat("beta_general")),
                           do_exact=do_exact, cut_type=cut_type, scale_fdr=scale_fdr, rho=rho,
                           dbg=dbg, verbose=verbose)
     binom_df = est_equiv_sample_size(fullrec["config"].getfloat("alpha_general"), 
@@ -673,9 +664,9 @@ def infinite_horizon_equivalent(shfp, cfgfp,  cfgsect, do_exact=False, dbg=False
                           p1=fullrec["config"].getfloat("p1"),
                           m_null=fullrec["m0"], m_alt=fullrec["m1"], 
                           low_sample=10, high_sample=125,
-                          seqlogfnr_gen=log(fullrec["FDR"]["binom"]["gen_FNR"]), 
-                          seqlogfnr_rej=log(fullrec["FDR"]["binom"]["rej_FNR"]), 
-                          seqlogfnr_gen_nominal=log(fullrec["config"].getfloat("beta_general")),
+                          seqlogfnr_gen=np.log(fullrec["FDR"]["binom"]["gen_FNR"]), 
+                          seqlogfnr_rej=np.log(fullrec["FDR"]["binom"]["rej_FNR"]), 
+                          seqlogfnr_gen_nominal=np.log(fullrec["config"].getfloat("beta_general")),
                           do_exact=do_exact, cut_type=cut_type, scale_fdr=scale_fdr, rho=rho,
                           dbg=dbg, verbose=verbose)
 

@@ -35,7 +35,7 @@ List of all functions in this module:
 * Non-functional data generator structures for future use in real streaming applications
 
 """
-from typing import Dict, List,  Optional, Tuple
+from typing import Callable, Dict, List,  Optional, Tuple
 import pandas as pd
 import datetime, os, string, warnings
 import numpy as np
