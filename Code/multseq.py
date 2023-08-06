@@ -375,6 +375,10 @@ def naive_barrier_trips(
     #    print(cutoff_vec[None, num_eliminated:])
     #    raise ValueError()
     # Calculate the number #{j: p_{j} > or < alpha_i } for each i
+    if isinstance(data_ser, pd.Series):
+        data_ser = data_ser.values
+    if isinstance(cutoff_vec, pd.Series):
+        cutoff_vec = cutoff_vec.values
     remaining_cutoffs = cutoff_vec[None, num_eliminated:]
     if highlow == "high":
         num_crossing_barrier = (data_ser[:, None] > remaining_cutoffs).sum(0)

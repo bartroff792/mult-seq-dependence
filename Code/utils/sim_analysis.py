@@ -13,13 +13,13 @@ from . import cutoff_funcs
 from . import data_funcs
 from scipy import stats
 import pandas as pd
+import numpy as np
 import tqdm
 import os
 import seaborn as sns
 import visualizations
 import configparser
 import statsmodels.formula.api as sm
-from configparser import ConfigParser
 from contextlib import closing
 import shelve
 from IPython.display import display
@@ -182,11 +182,11 @@ def get_oc_range(p0, p1,
         drr = dar + dnar
     elif hyp_type == "binom":
         dar, ground_truth = data_funcs.assemble_fake_binom(m_null, False, p0, p1, m_alt=m_alt)
-        drr = pd.Series(ones(len(dar)), index=dar.index)
+        drr = pd.Series(np.ones(len(dar)), index=dar.index)
         dnar = None
     elif hyp_type == "pois":
         dar, ground_truth = data_funcs.assemble_fake_pois(m_null, False, p0, p1, m_alt=m_alt)
-        drr = pd.Series(ones(len(dar)), index=dar.index)
+        drr = pd.Series(np.ones(len(dar)), index=dar.index)
         dnar = None
     else:
         raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
@@ -222,15 +222,15 @@ def get_oc_range(p0, p1,
     if dbg:
         dbg_record = dict()
     reps_list = []
-    fdr_var_vec = zeros(period_test_points)
-    fnr_var_vec = zeros(period_test_points)
-    pfdr_var_vec = zeros(period_test_points)
-    pfnr_var_vec = zeros(period_test_points)
+    fdr_var_vec = np.zeros(period_test_points)
+    fnr_var_vec = np.zeros(period_test_points)
+    pfdr_var_vec = np.zeros(period_test_points)
+    pfnr_var_vec = np.zeros(period_test_points)
     
-    fdr_vec = zeros(period_test_points)
-    fnr_vec = zeros(period_test_points)
-    pfdr_vec = zeros(period_test_points)
-    pfnr_vec = zeros(period_test_points)
+    fdr_vec = np.zeros(period_test_points)
+    fnr_vec = np.zeros(period_test_points)
+    pfdr_vec = np.zeros(period_test_points)
+    pfnr_vec = np.zeros(period_test_points)
     
     
     
@@ -249,11 +249,11 @@ def get_oc_range(p0, p1,
         reps_list.append(reps_per_period_point_ish)
         if dbg:
             
-            rej_rec = pd.DataFrame(zeros((reps_per_period_point_ish, (m_null + m_alt))).astype(float), columns=dar.index)
-            pval_rec = pd.DataFrame(zeros((reps_per_period_point_ish, (m_null + m_alt))).astype(float), columns=dar.index)
+            rej_rec = pd.DataFrame(np.zeros((reps_per_period_point_ish, (m_null + m_alt))).astype(float), columns=dar.index)
+            pval_rec = pd.DataFrame(np.zeros((reps_per_period_point_ish, (m_null + m_alt))).astype(float), columns=dar.index)
         
-        fdp_rec = zeros(reps_per_period_point_ish)
-        fnp_rec = zeros(reps_per_period_point_ish)
+        fdp_rec = np.zeros(reps_per_period_point_ish)
+        fnp_rec = np.zeros(reps_per_period_point_ish)
         
         # Perform MC simulations for a given fixed sample size
         for i in tqdm.tqdm_notebook(range(reps_per_period_point_ish), desc="reps for {0} periods".format(n_periods),
@@ -559,14 +559,14 @@ def finite_horizon_equivalent_oc(shfp, cfgfp, cfgsect, n_reps=100, halfp=True):
         scaled_alpha_vec = alpha_vec_raw
     
     #pois
-    fdp_rec_pois = zeros(n_reps, float)
-    fnp_rec_pois = zeros(n_reps, float)
-    fdp_rec_pois_unscaled = zeros(n_reps, float)
-    fnp_rec_pois_unscaled = zeros(n_reps, float)
+    fdp_rec_pois = np.zeros(n_reps, float)
+    fnp_rec_pois = np.zeros(n_reps, float)
+    fdp_rec_pois_unscaled = np.zeros(n_reps, float)
+    fnp_rec_pois_unscaled = np.zeros(n_reps, float)
     lam0 = fullrec["config"].getfloat("lam0")
     lam1 = fullrec["config"].getfloat("lam1")
     dar, ground_truth = data_funcs.assemble_fake_pois(m0, False, lam0, lam1, m_alt=m1)
-    drr = pd.Series(ones(len(dar)), index=dar.index)
+    drr = pd.Series(np.ones(len(dar)), index=dar.index)
     dnar = None
     for i in tqdm.tqdm(range(n_reps), "pois FH reps"):
         p_val = fixed_sample_pval("pois", dar, dnar, drr, rho, lam0, lam1, n_periods, halfp)
@@ -600,12 +600,12 @@ def finite_horizon_equivalent_oc(shfp, cfgfp, cfgsect, n_reps=100, halfp=True):
 
 
     #binom
-    fdp_rec_binom = zeros(n_reps, float)
-    fnp_rec_binom = zeros(n_reps, float)
+    fdp_rec_binom = np.zeros(n_reps, float)
+    fnp_rec_binom = np.zeros(n_reps, float)
     p0 = fullrec["config"].getfloat("p0")
     p1 = fullrec["config"].getfloat("p1")
     dar, ground_truth = data_funcs.assemble_fake_binom(m0, False, p0, p1, m_alt=m1)
-    drr = pd.Series(ones(len(dar)), index=dar.index)
+    drr = pd.Series(np.ones(len(dar)), index=dar.index)
     dnar = None
     for i in tqdm.tqdm(range(n_reps), "binom FH reps"):
         p_val = fixed_sample_pval("binom", dar, dnar, drr, rho, p0, p1, n_periods, halfp)

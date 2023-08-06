@@ -2,11 +2,12 @@
 
 List of all functions in this module:
 * Loading and screening drug data
+    * gen_names: Generates a list of n_hyps unique names for hypotheses.
+    * read_drug_data: Reads drug reaction counts, screens drugs, and returns rates df.
+    * prescreen_abs: generates a drug screening function based on absolute cutoffs in reaction counts.
+    * prescreen_rel: generates a drug screening function based on percentile cutoffs in reaction counts.
     * gen_skew_prescreen:
-    * read_drug_data:
-    * prescreen_abs:
-    * prescreen_rel:
-    * drug_data_metadata:
+    * drug_data_metadata: dataclass... not really metadata and not used in this module.... maybe delete?
 * Generate fake data rates (but not observations)
     * assemble_fake_drugs:
     * assemble_fake_gaussian:
@@ -33,6 +34,11 @@ List of all functions in this module:
     * simulate_correlated_binom:
     * simulate_correlated_pois:
 * Non-functional data generator structures for future use in real streaming applications
+    * online_data:
+    * online_data_generator:
+    * dg_dgp_wrapper:
+    * df_generator:
+
 
 """
 from typing import Callable, Dict, List,  Optional, Tuple
@@ -70,21 +76,11 @@ def gen_names(n_hyps: int) -> List[str]:
 TOTAL_AMNESIA_CNAME = "Total All"
 TOTAL_REACTS_CNAME = "total_reactions"
 DATA_FILE_PATH = os.path.expanduser('../../Data/YellowcardData.csv')
+ScreeningFuncType = Callable[[pd.DataFrame, str, str], pd.DataFrame]
 
-def gen_skew_prescreen(min_am=1, min_tot=20, aug_am=1, aug_non=1):
-    """Generates a drug prescreening function to be passed to read_drug_data."""
-    def skew_prescreen(reacts_df, am_col, tot_col):
-        # Select only drugs that have either min_am amnesia reports or min_tot total side effect reports.
-        screened_df = reacts_df[(reacts_df[am_col]>min_am) | (reacts_df[tot_col]>min_tot)].copy()
-        # Calculate the amnesia rate for each drug (augmenting by aug_am)
-        screened_df[TOTAL_AMNESIA_CNAME] = screened_df[TOTAL_AMNESIA_CNAME] + aug_am
-        # Calculate the total side effects rate for each drug (augmenting by aug_non + aug_am)
-        screened_df[TOTAL_REACTS_CNAME] = screened_df[TOTAL_REACTS_CNAME] + aug_am + aug_non
-        return screened_df
-    return skew_prescreen
 
-def read_drug_data(path: str, prescreen: bool=True, aug:int=1) -> Tuple[pd.Series, pd.Series, Tuple[int, int]]:
-    """Read drug reaction rates and some metadata from file.
+def read_drug_data(path: str, prescreen: Optional[ScreeningFuncType]=None, aug:int=1) -> Tuple[pd.Series, pd.Series, Tuple[int, int]]:
+    """Read drug reaction counts and metadata from file; screen drugs and return rates df.
 
     Args:
         path (str): path to csv file containing drug reaction data.
@@ -113,23 +109,29 @@ def read_drug_data(path: str, prescreen: bool=True, aug:int=1) -> Tuple[pd.Serie
     if prescreen:
         reacts_df = prescreen(reacts_df, TOTAL_AMNESIA_CNAME, TOTAL_REACTS_CNAME)
 
-    amnesia_reacts = reacts_df[TOTAL_AMNESIA_CNAME]
+    amnesia_reactions = reacts_df[TOTAL_AMNESIA_CNAME]
+    total_reactions = reacts_df[TOTAL_REACTS_CNAME]
     secs_per_year = datetime.timedelta(365).total_seconds()
     date_range_col = (reacts_df["end_date"]-reacts_df["first_react"]).apply(
         lambda drange: drange/numpy.timedelta64(1,'s'))/secs_per_year
     N_reports = reacts_df[TOTAL_REACTS_CNAME].sum()
     N_amnesia = reacts_df[TOTAL_AMNESIA_CNAME].sum()
     # Calculate rates
-    drug_amnesia_rate = (aug + reacts_df[TOTAL_AMNESIA_CNAME])/date_range_col
-    drug_reacts_rate = (2 * aug + reacts_df[TOTAL_REACTS_CNAME])/date_range_col
+    drug_amnesia_rate = (aug + amnesia_reactions)/date_range_col
+    drug_reacts_rate = (2 * aug + total_reactions)/date_range_col
     drug_nonamnesia_rate = drug_reacts_rate - drug_amnesia_rate
     return drug_amnesia_rate, drug_nonamnesia_rate, (N_amnesia, N_reports)
 
 
-def prescreen_abs(min_am_reacts: int, min_total_reacts: int) -> Callable[[pd.DataFrame, str, str], pd.DataFrame]:
+def prescreen_abs(min_am_reacts: int, min_total_reacts: int) -> ScreeningFuncType:
     """Creates a prescreening function based on absolute reaction counts.
     
-    For use in read_data. Clips drugs with too few reports based on absolute counts.
+    Clips drugs with too few reports based on absolute counts. Screens out drugs that have
+    fewer than min_am_reacts amnesia reports *or* fewer than min_total_reacts total side 
+    effect reports.
+    Screening function takes a DataFrame of reaction records, as well as the target reaction type
+    column and the total reaction column. The function is intended to be passed to read_drug_data.
+    
 
     Args:
         min_am_reacts (int): minimum number of amnesia reports for a drug to be included.
@@ -139,18 +141,23 @@ def prescreen_abs(min_am_reacts: int, min_total_reacts: int) -> Callable[[pd.Dat
         Callable[[pd.DataFrame, str, str], pd.DataFrame]: prescreening function that takes
             a dataframe of drug reaction rates and returns a dataframe of drug reaction rates.
     """
-    def prescreen(reacts_df: pd.DataFrame, TOTAL_AMNESIA_CNAME: str, TOTAL_REACTS_CNAME: str) -> pd.DataFrame:
+    def prescreen(reacts_df: pd.DataFrame, target_reaction_col_name: str, total_reaction_col_name: str) -> pd.DataFrame:
         """Screens a dataframe of drug reaction rates for drugs with too few reports."""
-        mask = np.logical_and(reacts_df[TOTAL_AMNESIA_CNAME] >= min_am_reacts,
-                           reacts_df[TOTAL_REACTS_CNAME] >= min_total_reacts)
+        mask = np.logical_and(reacts_df[target_reaction_col_name] >= min_am_reacts,
+                           reacts_df[total_reaction_col_name] >= min_total_reacts)
         return reacts_df[mask]
     return prescreen
         
 
-def prescreen_rel(min_am_reacts_percentile: float, min_total_reacts_percentile: float) -> Callable[[pd.DataFrame, str, str], pd.DataFrame]:
+def prescreen_rel(min_am_reacts_percentile: float, min_total_reacts_percentile: float) -> ScreeningFuncType:
     """Creates a prescreening function based on percentile reaction counts.
     
-    For use in read_data. Clips drugs with too few reports based on percentiles.
+    Takes a percentile (numpy, (0,100)) of target reaction counts and total reaction counts 
+    over the whole set of drugs, and sets those as cutoffs, screens any drug with counts that
+    fall below *either* of those cutoffs. Screening function takes a DataFrame of reaction records, 
+    as well as the target reaction type column and the total reaction column. The function is 
+    intended to be passed to read_drug_data.
+    
 
     Args:
         min_am_reacts_percentile (float): minimum percentile of amnesia reports for a drug to be included. Between 1 and 99.
@@ -160,16 +167,49 @@ def prescreen_rel(min_am_reacts_percentile: float, min_total_reacts_percentile: 
         Callable[[pd.DataFrame, str, str], pd.DataFrame]: prescreening function that takes a dataframe of drug reaction rates and 
             returns a dataframe of drug reaction rates.
     """
-    def prescreen(reacts_df: pd.DataFrame, TOTAL_AMNESIA_CNAME:str, TOTAL_REACTS_CNAME:str) -> pd.DataFrame:
+    def prescreen(reacts_df: pd.DataFrame, target_reaction_col_name:str, total_reaction_col_name:str) -> pd.DataFrame:
         """Removes drugs with too few reports from a dataframe of drug reaction rates."""
-        min_am_reacts = np.percentile(reacts_df[TOTAL_AMNESIA_CNAME], 
+        min_am_reacts = np.percentile(reacts_df[target_reaction_col_name], 
                                    min_am_reacts_percentile)
-        min_total_reacts = np.percentile(reacts_df[TOTAL_REACTS_CNAME], 
+        min_total_reacts = np.percentile(reacts_df[total_reaction_col_name], 
                                       min_total_reacts_percentile)
-        mask = np.logical_and(reacts_df[TOTAL_AMNESIA_CNAME] >= min_am_reacts,
-                           reacts_df[TOTAL_REACTS_CNAME] >= min_total_reacts)
+        mask = np.logical_and(reacts_df[target_reaction_col_name] >= min_am_reacts,
+                           reacts_df[total_reaction_col_name] >= min_total_reacts)
         return reacts_df[mask]
     return prescreen    
+
+
+def gen_skew_prescreen(min_am: int=1, min_tot: int=20, aug_am: int=1, aug_non: int=1) -> ScreeningFuncType:
+    """Generates a drug prescreening (and reaction count augmenting) function.
+     
+    Screens drugs that fall below *both* the minimum amnesia report count and the minimum total
+    side effect report count. This allows more skewed drugs. Also augments amnesia report counts
+    to smooth a bit.
+    Screening function takes a DataFrame of reaction records, as well as the target reaction type
+    column and the total reaction column. The function is intended to be passed to read_drug_data.
+    
+    Args:
+        min_am (int, optional): minimum number of amnesia (or other target reaction) reports for 
+            a drug to be included. Defaults to 1.
+        min_tot (int, optional): minimum number of total side effect reports for a drug to be
+            included. Defaults to 20.
+        aug_am (int, optional): amount to augment amnesia report counts by. Defaults to 1.
+        aug_non (int, optional): amount to augment non-amnesia report counts by. Defaults to 1.
+
+    Returns:
+        Callable[[pd.DataFrame, str, str], pd.DataFrame]: prescreening function that takes
+            a dataframe of drug reaction rates and returns a dataframe that contains augmented
+            reaction counts for a subset of those initial drugs.
+    """
+    def skew_prescreen(reacts_df: pd.DataFrame, am_col: str, tot_col:str) -> pd.DataFrame:
+        # Select only drugs that have either min_am amnesia reports or min_tot total side effect reports.
+        screened_df = reacts_df[(reacts_df[am_col]>min_am) | (reacts_df[tot_col]>min_tot)].copy()
+        # Calculate the amnesia rate for each drug (augmenting by aug_am)
+        screened_df[TOTAL_AMNESIA_CNAME] = screened_df[TOTAL_AMNESIA_CNAME] + aug_am
+        # Calculate the total side effects rate for each drug (augmenting by aug_non + aug_am)
+        screened_df[TOTAL_REACTS_CNAME] = screened_df[TOTAL_REACTS_CNAME] + aug_am + aug_non
+        return screened_df
+    return skew_prescreen
 
 
 @dataclass
@@ -321,7 +361,8 @@ def assemble_fake_pois_grad(m_null, p0, p1, m_alt=None):
     return pd.Series(dar_vals, index=drug_names)
 
     
-def simulate_reactions(drug_amnesia_rate: pd.Series, drug_nonamnesia_rate: pd.Series, n_periods: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def simulate_reactions(drug_amnesia_rate: pd.Series, drug_nonamnesia_rate: pd.Series, n_periods: int,
+                       ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Given series of drug amnesia and non-amnesia rates, gerenates data.
     
     args:
@@ -334,12 +375,12 @@ def simulate_reactions(drug_amnesia_rate: pd.Series, drug_nonamnesia_rate: pd.Se
     sim_amnesia_reactions = pd.DataFrame(dict([
                 (drug_name, poisson.rvs(individual_drug_rate, size=n_periods)) if individual_drug_rate>0
                 else (drug_name, np.zeros(n_periods))
-                for drug_name, individual_drug_rate in drug_amnesia_rate.iteritems()])).cumsum()
+                for drug_name, individual_drug_rate in drug_amnesia_rate.items()])).cumsum()
     
     sim_nonamnesia_reactions = pd.DataFrame(dict([
                 (drug_name, poisson.rvs(individual_drug_rate, size=n_periods)) if individual_drug_rate>0
                 else (drug_name, np.zeros(n_periods))
-                for drug_name, individual_drug_rate in drug_nonamnesia_rate.iteritems()])).cumsum()
+                for drug_name, individual_drug_rate in drug_nonamnesia_rate.items()])).cumsum()
     return (sim_amnesia_reactions.reindex(columns=drug_amnesia_rate.index), 
             sim_nonamnesia_reactions.reindex(columns=drug_nonamnesia_rate.index))
 
@@ -356,13 +397,13 @@ def simulate_reactions(drug_amnesia_rate: pd.Series, drug_nonamnesia_rate: pd.Se
 def simulate_binom(bin_props: pd.Series, n_periods: int)-> pd.DataFrame:
     """Generates cumulative success counts for binomial processes."""
     out_dict = {}
-    for hyp_name, hyp_prop in bin_props.iteritems():
+    for hyp_name, hyp_prop in bin_props.items():
         out_dict[hyp_name] = binom.rvs(1, hyp_prop, size=n_periods)
     return pd.DataFrame(out_dict).cumsum().reindex(columns=bin_props.index)
 
 def simulate_pois(pois_rates, n_periods):
     return pd.DataFrame(dict([(hyp_name, poisson.rvs(hyp_rate, size=n_periods))
-        for hyp_name, hyp_rate in pois_rates.iteritems()])).cumsum().reindex(columns=pois_rates.index)    
+        for hyp_name, hyp_rate in pois_rates.items()])).cumsum().reindex(columns=pois_rates.index)    
 
     
         
@@ -559,7 +600,7 @@ def simulate_correlated_binom(bin_props, n_periods, rho,
     uuA = pd.DataFrame(norm.cdf(multivariate_normal(cov=cov_mat).rvs(size=n_periods)), 
                           columns = bin_props.index)
     return pd.DataFrame(dict([(hyp_name, binom.ppf(uuA[hyp_name], 1, hyp_prop))
-        for hyp_name, hyp_prop in bin_props.iteritems()])).cumsum().reindex(columns=bin_props.index)
+        for hyp_name, hyp_prop in bin_props.items()])).cumsum().reindex(columns=bin_props.index)
 
 def simulate_correlated_pois(pois_rates, n_periods, rho, 
                              m1=None, rho1=None, rand_order=False):
@@ -571,7 +612,7 @@ def simulate_correlated_pois(pois_rates, n_periods, rho,
     uuA = pd.DataFrame(norm.cdf(multivariate_normal(cov=cov_mat).rvs(size=n_periods)), 
                           columns = pois_rates.index)
     return pd.DataFrame(dict([(hyp_name, poisson.ppf(uuA[hyp_name], hyp_rate))
-        for hyp_name, hyp_rate in pois_rates.iteritems()])).cumsum().reindex(columns=pois_rates.index)
+        for hyp_name, hyp_rate in pois_rates.items()])).cumsum().reindex(columns=pois_rates.index)
  
 # %% streaming code
 # TODO(mhankin): make .df a reference to the updated dataframe... somehow
