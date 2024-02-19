@@ -16,20 +16,20 @@ Functions:
     compute_fdp: Computes FDP and FNP of testing procedure output for a run 
         where ground truth is known.
 """
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, Literal
 from numpy import arange, diff, zeros, mod, ones, log
 import numpy
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import multseq
-import visualizations
-import string
+# import visualizations
+# import string
 from tqdm import tqdm
 from . import common_funcs
 from .cutoff_funcs import (
     finite_horizon_rejective_cutoffs,
-    create_fdr_controlled_alpha,
+    apply_fdr_controlled_alpha,
     guo_rao_stepdown_fdr_level,
     infinite_horizon_MC_cutoffs,
     create_fdr_controlled_bl_alpha_indpt,
@@ -241,7 +241,7 @@ def synth_simfunc(
     n_periods: int,
     p0: float,
     p1: float,
-    A_B: Tuple[np.ndarray, np.ndarray],
+    cutoff_df: pd.DataFrame,
     n_reps: int,
     job_id: int,
     rho: float,
@@ -255,7 +255,8 @@ def synth_simfunc(
     cummax=False,
     **kwargs,
 ):
-    rejective = A_B[1] is None
+    
+    rejective = "B" not in cutoff_df.columns
     # Handle progress logging for multi-process run
     if job_id == 0:
         main_iter = tqdm(range(n_reps), desc="MC full path simulations")
@@ -304,17 +305,16 @@ def synth_simfunc(
             llr = data_funcs.online_data(dar.index, dgp)
 
             tout = multseq.msprt(
-                llr,
-                A_B[0],
-                A_B[1],
+                statistics=llr,
+                cutoffs=cutoff_df,
                 record_interval=100,
                 stepup=stepup,
                 rejective=rejective,
                 verbose=False,
             )
             del llr
-            rej_rec.append(tout[0]["drugTerminationData"]["ar0"])
-            step_rec.append(tout[0]["drugTerminationData"]["step"])
+            rej_rec.append(tout.fine_grained.hypTerminationData["ar0"])
+            step_rec.append(tout.fine_grained.hypTerminationData["step"])
 
         return (
             pd.DataFrame(rej_rec).reset_index(drop=True),
@@ -325,8 +325,6 @@ def synth_simfunc(
             zeros((n_reps, 4)), columns=["fdp", "fnp", "tot_rej", "tot_acc"]
         )
         for i in main_iter:
-            #            llr = generate_llr(dar, dnar, n_periods, rho, hyp_type, p0, p1,
-            #                               m1, rho1, rand_order=rand_order, cummax=cummax)
             if rejective:
                 llr_data = generate_llr(
                     dar,
@@ -361,17 +359,16 @@ def synth_simfunc(
             llr = data_funcs.online_data(dar.index, dgp)
 
             tout = multseq.msprt(
-                llr,
-                A_B[0],
-                A_B[1],
+                statistics=llr,
+                cutoffs=cutoff_df,
                 record_interval=100,
                 stepup=stepup,
                 rejective=rejective,
                 verbose=False,
             )
             del llr
-            dtd = tout[0]["drugTerminationData"]
-            fdp_rec.ix[i] = compute_fdp(dtd, ground_truth)
+            dtd = tout.fine_grained.hypTerminationData
+            fdp_rec.loc[i, :] = compute_fdp(dtd, ground_truth)
             if (mod(i, 100) == 1) and (i > 1) and (job_id == 0):
                 tqdm.write("Running average: \n{0}".format(fdp_rec.mean()))
         return fdp_rec
@@ -388,21 +385,22 @@ def synth_simfunc_wrapper(kwargs):
 
 
 def calc_sim_cutoffs(
-    drr,
-    alpha,
-    beta=None,
-    scale_fdr=True,
-    cut_type="BL",
-    p0=None,
-    p1=None,
-    stepup=False,
-    m0_known=False,
-    m_total=None,
+    drr: pd.Series,
+    alpha: float,
+    beta: Optional[float]=None,
+    scale_fdr: bool=True,
+    cut_type: Literal["BH", "BY", "BL", "HOLM"]="BL",
+    p0:float=None,
+    p1:float=None,
+    stepup:bool=False,
+    # m0_known:bool=False,
+    m0: Optional[int]=None,
+    m_total:int=None,
     n_periods=None,
     undershoot_prob=0.1,
-    do_iterative_cutoff_MC_calc=False,
-    hyp_type=None,
-    fin_par=False,
+    do_iterative_cutoff_MC_calc=False, # what is this?
+    hyp_type: Literal["pois", "binom", "pois_grad"]="pois",
+    fin_par:bool=False,
     fh_sleep_time=6,
     fh_cutoff_normal_approx=False,
     fh_cutoff_imp_sample=False,
@@ -410,8 +408,23 @@ def calc_sim_cutoffs(
     fh_cutoff_imp_sample_hedge=0.9,
     dbg=False,
     divide_cores=None,
-    cummax=False,
-):
+    ) -> Tuple[pd.DataFrame, int]:
+    """Get the LLR cutoffs for a set of generating paramters.
+    
+    Args:
+        drr:
+
+    Raises:
+        Exception: _description_
+        ValueError: _description_
+
+    Returns:
+        Tuple with 2 elements:
+        - A pandas DataFrame with the cutoffs columns A and B (B only appears if infinite horizon)
+            - might also have other stuff???
+        - The number of periods to run the simulation for. will just be an echo of the input if that
+            was provided. Otherwise 1000 for FH and data dependent for Infinite horizon.
+    """ 
     m_hyps = len(drr)
     if (cut_type == "BY") or (cut_type == "BL"):
         alpha_vec_raw = create_fdr_controlled_bl_alpha_indpt(alpha, m_hyps)
@@ -426,47 +439,48 @@ def calc_sim_cutoffs(
 
     if scale_fdr:
         if stepup:
+            raise NotImplementedError("Stepup not implemented for FDR control")
             scaled_alpha_vec = alpha_vec_raw / log(m_hyps)
         else:
-            if m0_known:
-                scaled_alpha_vec = (
-                    alpha
-                    * alpha_vec_raw
-                    / cutoff_funcs.guo_rao_stepdown_fdr_level(alpha_vec_raw, m_total)
-                )
-            else:
-                scaled_alpha_vec = cutoff_funcs.create_fdr_controlled_alpha(
-                    alpha, alpha_vec_raw
+            scaled_alpha_vec = cutoff_funcs.apply_fdr_controlled_alpha(
+                    alpha, alpha_vec_raw, m0=m0,
                 )
     else:
+        print("Warning! Not scaling alpha for FDR control")
         scaled_alpha_vec = alpha_vec_raw
 
     if beta is not None:  # Infinite horizon
-        if cummax:
-            warnings.warn("Cummulative Max stats not implemented for infinite horzion")
         beta_vec_raw = beta * alpha_vec_raw / alpha
         if scale_fdr:
             if stepup:
+                raise NotImplementedError("Stepup not implemented for FDR control")
                 scaled_beta_vec = beta_vec_raw / log(m_hyps)
             else:
-                if m0_known:
-                    scaled_beta_vec = (
-                        beta
-                        * beta_vec_raw
-                        / cutoff_funcs.guo_rao_stepdown_fdr_level(beta_vec_raw, m_total)
-                    )
-                else:
-                    scaled_beta_vec = cutoff_funcs.create_fdr_controlled_alpha(
-                        beta, beta_vec_raw
+                scaled_beta_vec = cutoff_funcs.apply_fdr_controlled_alpha(
+                        beta, beta_vec_raw, m0=m0,
                     )
         else:
+            print("Warning! Not scaling beta for FNR control")
             scaled_beta_vec = beta_vec_raw
 
-        A_vec, B_vec = cutoff_funcs.calculate_mult_sprt_cutoffs(
+        # Use Wald approximations to get from alpha and beta to A and B
+        cutoff_df = cutoff_funcs.calculate_mult_sprt_cutoffs(
             scaled_alpha_vec, scaled_beta_vec
         )
+        A_vec = cutoff_df["A"].values
+        B_vec = cutoff_df["B"].values
 
+        # In the infinite horizon case, estimate the number of periods
+        # necessary to accept or reject all candidates with some probability.
+        # First estimates expected number of periods for all hyps to terminate
+        # then uses markovs inequality to get the number of periods to get the
+        # desired bound.
         if n_periods is None:
+            # Define \tilde{\tau}=\max_i \tau_i
+            # By Markov we have P(\tilde{\tau} > n) <= E[\tilde{\tau}]/n
+            # If we wish the LHS to be \leq \delta, we need
+            # E[\tilde{\tau}] / n <= \delta
+            # E[\tilde{\tau}] / \delta <= n
             n_periods = int(
                 cutoff_funcs.est_sample_size(
                     A_vec, B_vec, drr, p0, p1, hyp_type=hyp_type
@@ -475,6 +489,7 @@ def calc_sim_cutoffs(
             )
 
         if do_iterative_cutoff_MC_calc:
+            raise NotImplementedError("Iterative cutoff MC calc not implemented. Too many bugs in this code")
             min_alpha_diff = min(diff(scaled_alpha_vec))
             min_beta_diff = min(diff(scaled_beta_vec))
             k_reps = int(
@@ -525,11 +540,9 @@ def calc_sim_cutoffs(
         #            print("A_Vec", A_vec)
         #            print("-"*10)
         B_vec = None
+        cutoff_df = pd.DataFrame({"A": A_vec,})
 
-    if dbg:
-        return A_vec, B_vec, n_periods, scaled_alpha_vec, scaled_beta_vec
-    else:
-        return A_vec, B_vec, n_periods
+    return cutoff_df, n_periods
 
 
 def real_data_wrapper(
@@ -628,6 +641,7 @@ def synth_data_sim(
     p1=0.045,
     n_periods=None,
     m_null=3,
+    m_alt=None,
     max_magnitude=10.0,
     sim_reps=100,
     m0_known=False,
@@ -643,7 +657,6 @@ def synth_data_sim(
     fh_sleep_time=60,
     sleep_time=25,
     do_iterative_cutoff_MC_calc=False,
-    m_alt=None,
     stepup=False,
     fh_cutoff_normal_approx=False,
     fh_cutoff_imp_sample=True,
@@ -687,6 +700,8 @@ def synth_data_sim(
     if m_alt is None:
         m_alt = m_null
     m_total = m_null + m_alt
+    # Populate the dar, dnar, drr, and ground_truth data necessary for generating
+    # the synthetic observations.
     if load_data is None:
         if (hyp_type is None) or (hyp_type == "drug"):
             dar, dnar, ground_truth = assemble_fake_drugs(
@@ -724,9 +739,9 @@ def synth_data_sim(
         drr = load_data["drr"]
         ground_truth = load_data["ground_truth"]
 
-    # Calculate alpha cutoffs
-    #    print("Cut type", cut_type)
-    A_vec, B_vec, n_periods = calc_sim_cutoffs(
+    # Calculate the LLR cutoffs and the number of simulation steps to run.
+    # If n
+    cutoff_df, n_periods = calc_sim_cutoffs(
         drr,
         alpha,
         beta=beta,
@@ -735,12 +750,12 @@ def synth_data_sim(
         p0=p0,
         p1=p1,
         stepup=stepup,
-        m0_known=m0_known,
+        m0=m_null if m0_known else None,
         m_total=m_total,
         n_periods=n_periods,
         undershoot_prob=undershoot_prob,
         hyp_type=hyp_type,
-        do_iterative_cutoff_MC_calc=do_iterative_cutoff_MC_calc,
+        do_iterative_cutoff_MC_calc=do_iterative_cutoff_MC_calc, # what is this?
         fin_par=fin_par,
         fh_sleep_time=fh_sleep_time,
         fh_cutoff_normal_approx=fh_cutoff_normal_approx,
@@ -751,7 +766,7 @@ def synth_data_sim(
     )
     # TODO: add options for scaling style
 
-    rejective = B_vec is None
+    rejective = "B" in cutoff_df.columns
     # Generate data
     if split_corr:
         m1 = m_alt
@@ -782,6 +797,8 @@ def synth_data_sim(
             logging.info("Cutoffs calcd, parallelized sims initiating")
             num_cpus = multiprocessing.cpu_count()
             num_jobs = num_cpus - 1
+            if num_jobs > 8:
+                num_jobs = 8
             if divide_cores is not None:
                 num_jobs = int(num_jobs / divide_cores)
                 if num_jobs < 1:
@@ -798,7 +815,7 @@ def synth_data_sim(
                         "n_periods": n_periods,
                         "p0": p0,
                         "p1": p1,
-                        "A_B": [A_vec, B_vec],
+                        "cutoff_df": cutoff_df,
                         "n_reps": n_rep,
                         "job_id": job_id,
                         "rho": rho,
@@ -842,7 +859,7 @@ def synth_data_sim(
                 "n_periods": n_periods,
                 "p0": p0,
                 "p1": p1,
-                "A_B": [A_vec, B_vec],
+                "cutoff_df": cutoff_df,
                 "n_reps": sim_reps,
                 "job_id": 0,
                 "rho": rho,
@@ -886,6 +903,12 @@ def synth_data_sim(
 
     else:
         if do_viz:
+            A_vec = cutoff_df["A"].values
+            if rejective:
+                B_vec = None
+            else:
+                B_vec = cutoff_df["B"].values
+            raise NotImplementedError("Viz not implemented")
             viz_stuff = visualizations.plot_multseq_llr(
                 llr.copy(),
                 A_vec,
@@ -910,9 +933,8 @@ def synth_data_sim(
         else:
             return (
                 multseq.msprt(
-                    llr,
-                    A_vec,
-                    B_vec,
+                    statistics=llr,
+                    cutoffs=cutoff_df,
                     record_interval=100,
                     stepup=stepup,
                     rejective=True,

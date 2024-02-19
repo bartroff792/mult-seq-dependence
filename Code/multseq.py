@@ -193,7 +193,7 @@ def msprt(
 
     if (cutoffs["B"]).isna().any() and (not rejective):
         raise ValueError("No B acceptance vector passed for acceptive-rejective test")
-    if rejective and (B_vec is not None):
+    if rejective: # and (B_vec is not None):
         # raise ValueError("B acceptance vector passed for rejective test")
         # TODO: raise a warning here
         pass
@@ -272,8 +272,11 @@ def msprt(
                     logging.info("num new accepts >0" + str(step))
                 acc_level_term[j_accepted : (j_accepted + num_new_accepts)] = step
                 j_accepted = j_accepted + num_new_accepts
+                # For each accepted hypothesis, record the step and level at which 
+                # it was accepted
                 termination_level.loc[accept_cols, "accLevel"] = j_accepted
                 termination_level.loc[accept_cols, "step"] = step
+                # Record all the hypotheses accepted at this step
                 llr_accepted[step] = list(accept_cols.values)
                 statistics.drop(accept_cols, axis=1, inplace=True)
 
@@ -298,10 +301,13 @@ def msprt(
         if num_new_rejects > 0:
             if verbose:
                 logging.info("num new rejects >0" + str(step))
+            # Log the steps at which this these rejections occurred
             rej_level_term[j_rejected : (j_rejected + num_new_rejects)] = step
             j_rejected = j_rejected + num_new_rejects
+            # For each rejected hypothesis, record the step and level at which it was rejected
             termination_level.loc[reject_cols, "rejLevel"] = j_rejected
             termination_level.loc[reject_cols, "step"] = step
+            # Record all the hypotheses rejected at this step
             llr_rejected[step] = list(reject_cols.values)
             statistics.drop(reject_cols, axis=1, inplace=True)
 
@@ -311,9 +317,11 @@ def msprt(
             logging.debug("Stopping early on step " + str(step))
             #            print("end\n", data_ser, "\n", j_rejected, j_accepted)
             break
-
-    rej_level_term.replace(np.inf, step + 1, inplace=True)
-    acc_level_term.replace(np.inf, step + 1, inplace=True)
+    
+    # WARNING! might break by skipping this
+    # rej_level_term.replace(np.inf, step + 1, inplace=True)
+    # acc_level_term.replace(np.inf, step + 1, inplace=True)
+        
     # Record final diagnostic data
     if verbose:
         logging.info(
@@ -331,7 +339,7 @@ def msprt(
 
     termination_level["ar0"] = termination_level.apply(RejAccOtherFunc, axis=1)
     if rejective:
-        termination_level.ix[pd.isnull(termination_level["ar0"]), "ar0"] = "acc"
+        termination_level.loc[pd.isnull(termination_level["ar0"]), "ar0"] = "acc"
 
     fine_grained_outcomes = FineGrainedMSPRTOut(
         **{

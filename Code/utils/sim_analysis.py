@@ -213,7 +213,7 @@ def get_oc_range(p0, p1,
 #                scaled_alpha_vec = alpha * alpha_vec_raw / cutoff_funcs.fdr_helper(alpha_vec_raw, m_total)
 #            else:
                 
-            scaled_alpha_vec = cutoff_funcs.create_fdr_controlled_alpha(alpha, alpha_vec_raw)
+            scaled_alpha_vec = cutoff_funcs.apply_fdr_controlled_alpha(alpha, alpha_vec_raw)
     else: 
         scaled_alpha_vec = alpha_vec_raw
     
@@ -554,7 +554,7 @@ def finite_horizon_equivalent_oc(shfp, cfgfp, cfgsect, n_reps=100, halfp=True):
 #                scaled_alpha_vec = alpha * alpha_vec_raw / cutoff_funcs.fdr_helper(alpha_vec_raw, m_total)
 #            else:
                 
-            scaled_alpha_vec = cutoff_funcs.create_fdr_controlled_alpha(alpha, alpha_vec_raw)
+            scaled_alpha_vec = cutoff_funcs.apply_fdr_controlled_alpha(alpha, alpha_vec_raw)
     else: 
         scaled_alpha_vec = alpha_vec_raw
     

@@ -2,3 +2,4 @@ Code/secrets*.*
 fix_ssh.sh
 *.pyc
 .vscode/*
+CloudRunner/*

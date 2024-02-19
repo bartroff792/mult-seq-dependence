@@ -15,7 +15,7 @@ List of all functions in this module with one line descriptions:
         vector under arbitrary joint.
     * guo_rao_scaling: Returns a constanst lambda such that using cutoffs 
         (alpha_i*lambda, ... ) control fdr at fdr_level
-    * create_fdr_controlled_alpha: Scales an alpha vector such that it 
+    * apply_fdr_controlled_alpha: Scales an alpha vector such that it 
         controls FDR for a stepdown procedure.
     * create_fdr_controlled_bh_alpha_indpt: Creates alpha vector that 
         controls FDR for stepup under independence, with BH shape.
@@ -141,7 +141,7 @@ def guo_rao_stepdown_fdr_level(
     Assumes alpha_vec[0] = alpha_1 <= alpha_vec[1] = alpha_2 <= alpha_vec[m-1] = alpha_m
     Args:
         alpha_vec: increasing array of p-value/significance cutoffs
-        m0: number of true null hypotheses.
+        m0: number of true null hypotheses, if known, otherwise None.
         get_max_m0: If m0 is None and a search is to be performed, passing True
             to this argument will return both the max fdr and the m0 at which
             it was achieved.
@@ -193,20 +193,21 @@ def guo_rao_stepdown_fdr_level(
     return m0 * (term1 + term2)
 
 
-def guo_rao_scaling(fdr_level: float, alpha_vec: np.ndarray) -> float:
+def get_guo_rao_scaling_factor(fdr_level: float, alpha_vec: np.ndarray, m0: Optional[int]=None) -> float:
     """Returns a constanst lambda such that using cutoffs (alpha_i*lambda, ... ) control fdr at fdr_level
 
     Args:
         fdr_level: level at which FDR must be controlled.
         alpha_vec: initial, unscaled vector of increasing alpha cutoffs.
+        m0: number of true null hypotheses, if known, otherwise None.
     Returns:
         A scaling factor which, when multiplied by alpha_vec, will return a
         proportional cutoff vector that controls alpha at the correct level.
     """
-    return fdr_level / guo_rao_stepdown_fdr_level(alpha_vec)
+    return fdr_level / guo_rao_stepdown_fdr_level(alpha_vec, m0=m0)
 
 
-def create_fdr_controlled_alpha(fdr_level: float, alpha_vec: FloatArray) -> FloatArray:
+def apply_fdr_controlled_alpha(fdr_level: float, alpha_vec: FloatArray, m0: Optional[int]=None) -> FloatArray:
     """Scales an alpha vector such that it controls FDR for a stepdown procedure.
 
     Does not require independence.
@@ -214,11 +215,12 @@ def create_fdr_controlled_alpha(fdr_level: float, alpha_vec: FloatArray) -> Floa
     Args:
         fdr_level: level at which FDR must be controlled for stepdown procedures.
         alpha_vec: initial, unscaled vector of increasing alpha cutoffs.
+        m0: number of true null hypotheses, if known, otherwise None.
 
     Returns:
         A vector of alpha cutoffs that control FDR at fdr_level for stepdown procedures.
     """
-    return guo_rao_scaling(fdr_level, alpha_vec) * alpha_vec
+    return get_guo_rao_scaling_factor(fdr_level, alpha_vec, m0=m0) * alpha_vec
 
 
 def create_fdr_controlled_bh_alpha_indpt(fdr_level: float, m_hyps: int) -> FloatArray:
@@ -254,7 +256,7 @@ def create_fdr_controlled_bh_alpha(fdr_level: float, m_hyps: int) -> FloatArray:
         A vector of alpha cutoffs that control FDR at fdr_level for stepdown procedures.
     """
     alpha_vec_raw = create_fdr_controlled_bh_alpha_indpt(fdr_level, m_hyps)
-    return create_fdr_controlled_alpha(fdr_level, alpha_vec_raw)
+    return apply_fdr_controlled_alpha(fdr_level, alpha_vec_raw)
 
 
 def create_fdr_controlled_bl_alpha_indpt(
@@ -320,7 +322,7 @@ def create_fdr_controlled_bl_alpha(
         indpt_fdr_level = fdr_level
     alpha_vec_raw = create_fdr_controlled_bl_alpha_indpt(indpt_fdr_level, m_hyps)
     # print(delvec)
-    return create_fdr_controlled_alpha(fdr_level, alpha_vec_raw)
+    return apply_fdr_controlled_alpha(fdr_level, alpha_vec_raw)
 
 
 def calc_bh_alpha_and_cuts(
@@ -1213,11 +1215,11 @@ def est_sample_size(
         negative_drift_under_null = llr_term_moments(drr, p0, p1)["term_mean"]
         positive_drift_under_alt = -llr_term_moments(drr, p1, p0)["term_mean"]
     elif hyp_type == "pois":
-        negative_drift_under_null = llr_pois_term_moments(p0, p1)["term_mean"]
-        positive_drift_under_alt = -llr_pois_term_moments(p1, p0)["term_mean"]
+        negative_drift_under_null = llr_pois_term_moments(np.array([p0]), np.array([p1]))["term_mean"]
+        positive_drift_under_alt = -llr_pois_term_moments(np.array([p1]), np.array([p0]))["term_mean"]
     elif hyp_type == "binom":
-        negative_drift_under_null = llr_binom_term_moments(p0, p1)["term_mean"]
-        positive_drift_under_alt = -llr_binom_term_moments(p1, p0)["term_mean"]
+        negative_drift_under_null = llr_binom_term_moments(np.array([p0]), np.array([p1]))["term_mean"]
+        positive_drift_under_alt = -llr_binom_term_moments(np.array([p1]), np.array([p0]))["term_mean"]
     else:
         raise ValueError("Unknown type {0}".format(hyp_type))
     # Get slowest drifting hypotheses, ie worst case.

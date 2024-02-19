@@ -807,7 +807,7 @@ def simulate_correlated_pois(
 class online_data(object):
     """streaming data interface class"""
 
-    def __init__(self, col_list, dgp):
+    def __init__(self, col_list: List[str], dgp):
         self._dgp = dgp
         if isinstance(col_list, pd.Index):
             self._columns = col_list
@@ -842,18 +842,18 @@ class online_data_generator(object):
     only used by online_data class
     """
 
-    def __init__(self, parent, dgp):
+    def __init__(self, parent:online_data, dgp: Callable[[List[str]], pd.Series]):
         self._parent = parent
         self._dgp = dgp
         self._current_index = -1
 
-    def __iter__(self):
+    def __iter__(self) -> "online_data_generator":
         return self
 
-    def __next__(self):
+    def __next__(self) -> Tuple[int, pd.Series]:
         return self.next()
 
-    def next(self):
+    def next(self) -> Tuple[int, pd.Series]:
         self._current_index = self._current_index + 1
         idx = self._current_index
         data_ser = self._dgp(self._parent.columns)
@@ -863,24 +863,24 @@ class online_data_generator(object):
 class df_dgp_wrapper(object):
     """wraps a pandas DataFrame to make it fit the dgp interface"""
 
-    def __init__(self, df):
+    def __init__(self, df: pd.DataFrame):
         self._df = df
         self._iter_rows = df.iterrows()
 
-    def __call__(self, col_list):
+    def __call__(self, col_list: List[str]) -> pd.Series:
         _, data_ser = next(self._iter_rows)
         if data_ser is None:
             StopIteration()
         return data_ser[col_list]
 
-    def get_data_record(self):
+    def get_data_record(self) -> pd.DataFrame:
         return self._df
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._df)
 
 
-def df_generator(df):
+def df_generator(df: pd.DataFrame) -> online_data:
     """Wraps a DataFrame in an online_data object, ready to go"""
     return online_data(df.columns.copy(), df_dgp_wrapper(df.copy()))
 

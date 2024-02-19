@@ -1,0 +1,11 @@
+numpy
+scipy
+pandas
+seaborn
+statsmodels
+tqdm
+sqlalchemy
+pymysql  
+cryptography
+pyarrow
+cloud-sql-python-connector[pymysql]
