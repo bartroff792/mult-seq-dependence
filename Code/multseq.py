@@ -14,7 +14,7 @@ The main functions are:
 
 
 """
-from typing import Any, Dict, List, Literal, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from numpy.typing import NDArray
 import numpy as np
 import pandas as pd
@@ -162,6 +162,7 @@ class MSPRTOut:
     record_interval: int
     stepup: bool
     rejective: bool
+    full_llr: Optional[pd.DataFrame] = None
 
 
 def msprt(
