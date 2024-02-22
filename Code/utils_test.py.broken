@@ -7,7 +7,7 @@ Created on Thu May 12 15:02:39 2016
 
 import unittest
 
-import fake_data
+# import fake_data
 from utils import common_funcs, cutoff_funcs, data_funcs
 from numpy import arange, diff, array, percentile
 import pandas
@@ -35,7 +35,7 @@ class TestCutoff(unittest.TestCase):
         cutoff_est, data_rec = cutoff_funcs.finite_horizon_rejective_cutoffs(
             drr, p0, p1, alpha_levels, n_periods, k_reps, dbg=True)
         data_rec = array(data_rec)
-        print sum(data_rec.var(0) == 0.0)
+        print(sum(data_rec.var(0) == 0.0))
         
         
     def test_calculate_mult_sprt_cutoffs(self):
@@ -46,11 +46,11 @@ class TestCutoff(unittest.TestCase):
         alpha_vec_raw = alpha * arange(1, 1+N_drugs) / float(N_drugs)
         beta_vec_raw = beta * arange(1, 1+N_drugs) / float(N_drugs)
         # Normal FDR and FNR
-        scaled_alpha_vec = cutoff_funcs.create_fdr_controlled_alpha(alpha, alpha_vec_raw)
-        scaled_beta_vec = cutoff_funcs.create_fdr_controlled_alpha(beta, beta_vec_raw)
+        scaled_alpha_vec = cutoff_funcs.apply_fdr_controlled_alpha(alpha, alpha_vec_raw)
+        scaled_beta_vec = cutoff_funcs.apply_fdr_controlled_alpha(beta, beta_vec_raw)
         A_vec, B_vec = cutoff_funcs.calculate_mult_sprt_cutoffs(scaled_alpha_vec, scaled_beta_vec, rho)
-        print "A: ", A_vec[:5], all(diff(A_vec) > 0)
-        print "B: ", B_vec[:5], all(diff(B_vec) < 0)
+        print( "A: ", A_vec[:5], all(diff(A_vec) > 0))
+        print( "B: ", B_vec[:5], all(diff(B_vec) < 0))
     
     def test_est_sample_size(self):
         alpha = .1

@@ -21,8 +21,8 @@ import pandas as pd
 import logging
 from dataclasses import dataclass
 
-from utils.data_funcs import df_generator
-from utils import cutoff_funcs
+from .data_funcs import df_generator
+from . import cutoff_funcs
 
 logger = logging.getLogger()
 logger.setLevel(min((logging.WARNING, logger.level)))
@@ -192,7 +192,7 @@ def msprt(
         # Copy data to prevent deletion
         statistics = df_generator(statistics.copy())
 
-    if (cutoffs["B"]).isna().any() and (not rejective):
+    if (not rejective) and (cutoffs["B"]).isna().any():
         raise ValueError("No B acceptance vector passed for acceptive-rejective test")
     if rejective: # and (B_vec is not None):
         # raise ValueError("B acceptance vector passed for rejective test")
@@ -408,7 +408,7 @@ def step_up_elimination(
     cutoff_vec: NDArray[np.float32],
     num_eliminated: int,
     highlow: HighLow = "high",
-) -> (List[Any], int):
+) -> Tuple[List[Any], int]:
     """Runs a rejection or acceptance phase of a sequential stepdown procedure.
 
     Args:

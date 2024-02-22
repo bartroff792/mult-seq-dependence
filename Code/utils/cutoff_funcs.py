@@ -528,6 +528,139 @@ def pfdr_pfnr_cutoffs(
     return alpha_vec1, beta_vec1
 
 
+# NEw version
+
+def importance_sample_interpolation_helper(
+        param0: Dict[str, Any],
+        param1: Dict[str, Any],
+        imp_sample_prop: float,
+        hyp_type: HypTypes,
+) -> float:
+    """ Calculate the simulation parameter for importance sampling.
+    
+    Args:
+        theta0: null param
+        theta1: alt param
+        imp_sample_prop: p=finv( f(p1) * q + f(p0) * (1-q))  as simulation dist param
+            where f and finv depend on the hypothesis type.
+        hyp_type: drug, binom, etc
+
+    Returns:
+        The simulation parameter for importance sampling.
+        """
+    if hyp_type == "drug" or hyp_type == "binom":
+        theta0 = param0["p"]
+        theta1 = param1["p"]
+        sim_theta = expit(
+            imp_sample_prop * logit(theta1) + (1.0 - imp_sample_prop) * logit(theta0)
+        )
+        sim_params = copy.deepcopy(param0)
+        sim_params["p"] = sim_theta
+
+    elif hyp_type == "pois":
+        theta0 = param0["mu"]
+        theta1 = param1["mu"]
+        sim_theta = np.exp(
+            imp_sample_prop * np.log(theta1) + (1.0 - imp_sample_prop) * np.log(theta0)
+        )
+        sim_params = copy.deepcopy(param0)
+        sim_params["mu"] = sim_theta
+    elif hyp_type == "gaussian":
+        theta0 = param0["mu"]
+        theta1 = param1["mu"]
+        sim_theta = imp_sample_prop * theta1 + (1.0 - imp_sample_prop) * theta0
+        sim_params = copy.deepcopy(param0)
+        sim_params["mu"] = sim_theta
+    else:
+        raise Exception("Unrecognized hyp type ", hyp_type)
+    return sim_params
+
+def finite_horizon_cutoff_simulation_general(
+    params0: Dict[str, Any],
+    params1: Dict[str, Any],
+    hyp_type: HypTypes,
+    n_periods: int = 100,
+    n_reps: int = 1000,
+    imp_sample: bool = True,
+    imp_sample_prop: float = 0.2,
+    # imp_sample_hedge: float = 0.9,
+) -> Tuple[FloatArray, FloatArray]:
+    """Generate finite horizon sample path maxs (and weights) for MC cutoff estimation.
+
+    Allows use of importance sampling to reduce variance of simulation.
+
+    Args:
+        p0: null param
+        p1: alt param
+        drr: drug response rate (ie overall rate of side effect reports)
+        n_periods: horizon
+        n_reps: number of MC reps
+        job_id: Used for parralelization and reporting
+        hyp_type: drug, binom, etc
+        imp_sample: boolean, use importance sampling
+        imp_sample_prop: p=p1 * q + p0 * (1-q)  as simulation dist param
+        imp_sample_hedge: proportion of samples to draw from importance
+            sampling, vs true null
+
+    Returns:
+        maxs: array of max llr for each MC rep
+        weights: array of weights for each MC rep. For a non-importance sampled run, these should be even.
+            When importance sampling is employed,
+
+    """
+
+    out_rec = []
+
+    weight_out = []
+    # If importance sampling is requested, calculate the simulation parameter
+    # based on the model type, the hypotheses, and the interpolation parameter.
+    sim_params = importance_sample_interpolation_helper(
+        params0, params1, imp_sample_prop, hyp_type
+    )
+    # Calculate the number of importance samples to draw.
+    # n_imp_samples = int(n_reps * imp_sample_hedge)
+    # Set up iterator and logging for parallelization.
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    # logger.debug("Simulating {0} with param {1}".format(hyp_type, sim_param))
+
+    # Perform MC iterations.
+    for ii in tqdm(range(n_reps), desc="MC cutoff simulations"):
+
+        # Switch to true H0 after max_imp_samples
+        # if do_imp and (i >= max_imp_samples):
+        #     logger.debug("Switch to H0 at {0} of {1}.".format(i, n_reps))
+        #     do_imp = False
+        #     sim_param = p0
+
+        llr_paths, obs_data = data_funcs.generate_llr_general(
+            params=sim_params,
+            n_periods=n_periods,
+            rho=1e-8,
+            hyp_type=hyp_type,
+            params0=params0,
+            params1=params1,
+            rand_order=False,
+            # extra_params=extra_params,
+        )
+        imp_weight = np.exp(data_funcs.compute_llr(observed_data=obs_data, hyp_type=hyp_type, params0=sim_params, params1=params0))
+        weight_out.append(imp_weight)
+
+
+        if np.isnan(llr_paths).any().any():
+            raise ValueError("NaN in llr at iter {0}".format(ii))
+        if imp_sample and np.isnan(np.array(weight_out)).any().any():
+            raise ValueError("NaN in weights at iter {0}".format(ii))
+        #            # Record the max value the each llr path reached
+        out_rec.append(llr_paths.max(0))
+    out_rec = np.array(out_rec)
+    weight_out = np.array(weight_out)
+
+    return out_rec, weight_out
+
+
+
+
 def finite_horizon_cutoff_simulation(
     p0: float,
     p1: float,
@@ -777,87 +910,25 @@ def finite_horizon_rejective_cutoffs(
 
     ten_pct = int(k_reps / 10.0)
     # Run simulation k_reps times
-    if do_parallel:
-        num_cpus = multiprocessing.cpu_count()
-        num_jobs = num_cpus - 1
-        if divide_cores is not None:
-            num_jobs = int(num_jobs / divide_cores)
-            if num_jobs < 1:
-                num_jobs = 1
-            print("num jobs {0}".format(num_jobs))
-        pool = multiprocessing.Pool(num_cpus - 1)
-        n_rep_list = common_funcs.chunk_mc(k_reps, num_jobs)
-        rs = pool.map_async(
-            finite_horizon_cutoff_simulation_wrapper,
-            [
-                {
-                    "p0": p0,
-                    "p1": p1,
-                    "drr": drr,
-                    "n_periods": n_periods,
-                    "n_reps": n_rep,
-                    "job_id": job_id,
-                    "hyp_type": hyp_type,
-                    "imp_sample": imp_sample,
-                    "imp_sample_prop": imp_sample_prop,
-                    "imp_sample_hedge": imp_sample_hedge,
-                }
-                for job_id, n_rep in enumerate(n_rep_list)
-            ],
-        )
-        #        pool.close()
-        remaining = rs._number_left
-        logging.info(
-            "Rej Cutoffs MC waiting for  {0} tasks to complete. ({1})\n".format(
-                remaining, time.ctime(time.time())
-            )
-        )
-        while True:
-            if (rs.ready()) or rs._number_left < 2:
-                break
-            remaining = rs._number_left
-            logging.info(
-                "Rej Cutoffs MC waiting for {0} tasks to complete. ({1})".format(
-                    remaining, time.ctime(time.time())
-                )
-            )
-            time.sleep(sleep_time)
-        remaining = rs._number_left
-        logging.info(
-            "Rej Cutoffs MC waiting for {0} tasks to complete. ({1})\n".format(
-                remaining, time.ctime(time.time())
-            )
-        )
-        record_raw = rs.get()
-        pool.close()
-
-        if imp_sample:
-            zipped_recs = zip(*record_raw)
-            # TODO: this is a mess.
-            record, weights = [np.vstack(rec_item) for rec_item in zipped_recs]
-
-        else:
-            record = list(itertools.chain.from_iterable(record_raw))
+    # TODO: what is happening here?
+    record_raw = finite_horizon_cutoff_simulation_wrapper(
+        {
+            "p0": p0,
+            "p1": p1,
+            "drr": drr,
+            "n_periods": n_periods,
+            "n_reps": k_reps,
+            "job_id": 0,
+            "hyp_type": hyp_type,
+            "imp_sample": imp_sample,
+            "imp_sample_prop": imp_sample_prop,
+            "imp_sample_hedge": imp_sample_hedge,
+        }
+    )
+    if imp_sample:
+        record, weights = record_raw
     else:
-        # TODO: what is happening here?
-        record_raw = finite_horizon_cutoff_simulation_wrapper(
-            {
-                "p0": p0,
-                "p1": p1,
-                "drr": drr,
-                "n_periods": n_periods,
-                "n_reps": k_reps,
-                "job_id": 0,
-                "hyp_type": hyp_type,
-                "imp_sample": imp_sample,
-                "imp_sample_prop": imp_sample_prop,
-                "imp_sample_hedge": imp_sample_hedge,
-            }
-        )
-        if imp_sample:
-            record, weights = record_raw
-        else:
-            record = record_raw
+        record = record_raw
     # Combine all path maximums into one array.
     # Shape is (# of reps, # of hyps)
     record = np.array(record)
@@ -1183,13 +1254,106 @@ def single_hyp_sequential_expected_rejection_time(A: float, B:float, mu_0:float)
         (np.exp(A) - np.exp(B)) * mu_0
     ))
 
+def llr_term_mean_general(params0: Dict[str, Any], params1: Dict[str, Any], hyp_type: HypTypes) -> pd.Series:
+    """Calculate the expected value of the llr terms for a general hypothesis test.
+
+    Args:
+        params0 (Dict[str, Any]): null hypothesis parameters
+        params1 (Dict[str, Any]): alternative hypothesis parameters
+        hyp_type (HypTypes): The type of hypothesis test to use.  One of "drug", "pois", or "binom"
+
+    Returns:
+        pd.Series: The expected value of the llr terms
+    """
+    if hyp_type == "drug":
+        raise NotImplementedError("Not implemented for drug type.")
+    elif hyp_type == "pois":
+
+        const_a = -(params1["mu"] - params0["mu"])
+        const_b = np.log(params1["mu"] / params0["mu"])
+        eX = params0["mu"]
+        term_mean = const_a + const_b * eX
+        return term_mean
+    elif hyp_type == "binom":
+        eX = params0["p"] * params0["n"]
+        const_a = np.log(params1["p"] / params0["p"])
+        const_b = np.log((1 - params1["p"]) / (1 - params0["p"]))
+        term_mean = const_a * eX + const_b * (params0["n"] - eX)
+        return term_mean
+    else:
+        raise ValueError("Unknown type {0}".format(hyp_type))
+
+def cutoff_verifier(A_vec: Union[np.ndarray, pd.Series], B_vec: Union[np.ndarray, pd.Series]):
+    """Verify that the cutoffs are in the correct order and are the same length."""
+    if isinstance(A_vec, pd.Series):
+        A_vec = A_vec.values
+    if isinstance(B_vec, pd.Series):
+        B_vec = B_vec.values
+    assert (np.diff(A_vec)<0).all(), "A_vec is not in descending order"
+    assert (np.diff(B_vec)>0).all(), "B_vec is not in ascending order"
+    assert len(A_vec) == len(B_vec), "A_vec and B_vec are not the same length"
+    assert A_vec[-1] > 0, "A_vec[-1] is not greater than 0"
+    assert B_vec[-1] < 0, "B_vec[-1] is not less than 0"
+
+def est_sample_size_general(
+    A_vec: FloatArray,
+    B_vec: FloatArray,
+    params0: Dict[str, Any],
+    params1: Dict[str, Any],
+    hyp_type: HypTypes,
+) -> int:
+    """Estimate the sample size needed to accept or reject all hypotheses.
+
+    in general, very conservative. Calculates expected rejection and 
+    acceptance times for the worst case cutoffs and worst case
+    hypotheses, then takes the worst of the two. The expectation could 
+    be misleading, but given the pairing of worst case hypothesis with
+    worst case cutoff, unlikely to underestimate.
+
+
+    Args:
+        A_vec (np.array):   A_vec[i] is the rejective?? cutoff for the ith hypothesis
+        B_vec (np.array):   B_vec[i] is the acceptive?? cutoff for the ith hypothesis
+        drr (pd.Series):    drug use rate series for drug hyptotheses
+        p0 (float):         The null hypothesis probability (or poisson rate if hyp_type is "pois")
+        p1 (float):         The alternative hypothesis probability (or poisson rate if hyp_type is "pois")
+        hyp_type (str):     The type of hypothesis test to use.  One of "drug", "pois", or "binom"
+
+    Returns:
+        int: The estimated sample size needed to accept or reject all hypotheses
+    """
+    cutoff_verifier(A_vec, B_vec)
+    negative_drift_under_null = llr_term_mean_general(params0, params1, hyp_type)
+    positive_drift_under_alt = -llr_term_mean_general(params1, params0, hyp_type)
+    
+    # Get slowest drifting hypotheses, ie worst case.
+    mu_0 = (negative_drift_under_null).max()
+    mu_1 = (positive_drift_under_alt).min()
+    # Get the most extreme cutoffs
+    most_extreme_rej_cutoff = A_vec[0]
+    most_extreme_acc_cutoff = B_vec[0]
+    # Get expected stopping time for absolute worst case rej and acc
+    max_expected_acceptance_time = single_hyp_sequential_expected_acceptance_time(
+        most_extreme_rej_cutoff, 
+        most_extreme_acc_cutoff, 
+        mu_1,
+        )
+    max_expected_rejection_time = single_hyp_sequential_expected_rejection_time(
+        most_extreme_rej_cutoff, 
+        most_extreme_acc_cutoff, 
+        mu_0,
+        )
+    # Take the worst of those. 
+    return max((max_expected_acceptance_time, max_expected_rejection_time))
+
+
 def est_sample_size(
     A_vec: FloatArray,
     B_vec: FloatArray,
-    drr: Optional[pd.Series],
-    p0: pd.Series,
-    p1: pd.Series,
+    theta0: pd.Series,
+    theta1: pd.Series,
     hyp_type: Optional[HypTypes] = "drug",
+    extra_params: Optional[Dict[str, Any]] = None,
 ) -> int:
     """Estimate the sample size needed to accept or reject all hypotheses.
 
@@ -1241,6 +1405,7 @@ def est_sample_size(
         )
     # Take the worst of those. 
     return max((max_expected_acceptance_time, max_expected_rejection_time))
+
 
 
 # Importance sampling section

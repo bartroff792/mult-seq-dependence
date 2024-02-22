@@ -41,19 +41,20 @@ List of all functions in this module:
 
 
 """
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 import pandas as pd
 import datetime, os, string, warnings
 import numpy as np
 import numpy.random
 from scipy.linalg import toeplitz
-from scipy.stats import norm, multivariate_normal, poisson, binom
+# from scipy.stats import norm, multivariate_normal, poisson, binom
+from scipy import stats
 import hashlib
 import logging
 from dataclasses import dataclass
 
 
-def gen_names(n_hyps: int) -> List[str]:
+def gen_names(n_hyps: int) -> pd.Index:
     """Generates a list of n_hyps unique names for hypotheses.
 
     Names will all be of the same length and take the form
@@ -69,13 +70,12 @@ def gen_names(n_hyps: int) -> List[str]:
     """
     STR_LEN = 3
     digits = int(numpy.ceil(numpy.log10(n_hyps)))
-    for i in range(n_hyps):
-        return [
+    return pd.Index([
             ("{0:0=" + str(digits) + "d}-{1}").format(
                 i, hashlib.sha1(str(i).encode("utf-8")).hexdigest()[:STR_LEN]
             )
             for i in range(n_hyps)
-        ]
+        ], name="hyp_name")
 
 
 # TODO: hardcoding this is EXTREMELY amateur
@@ -272,6 +272,22 @@ def build_interleaved_ground_truth(m_null: int, m_alt: int) -> list[bool]:
     return ground_truth
 
 
+
+def assemble_fake_drugs_general(
+    max_magnitude: float,
+    m_null: int,
+    interleaved: bool,
+    theta0: float,
+    theta1: float,
+    extra_params: Dict[str, pd.Series],
+    m_alt: Optional[int] = None,
+) -> Tuple[Dict[str,pd.Series], pd.Series]:
+    dar, dnar, ground_truth = assemble_fake_drugs(
+        extra_params["max_magnitude"], m_null, interleaved, theta0, theta1, m_alt
+    )
+    return {"dar": dar, "dnar": dnar}, ground_truth
+
+
 def assemble_fake_drugs(
     max_magnitude: float,
     m_null: int,
@@ -279,7 +295,7 @@ def assemble_fake_drugs(
     p0: float,
     p1: float,
     m_alt: Optional[int] = None,
-) -> (pd.Series, pd.Series, pd.Series):
+) -> Tuple[pd.Series, pd.Series, pd.Series]:
     """Assembles dar and dnar for fake drugs.
 
     Note: when m_alt is specified, the magnitudes will be messily interleaved.
@@ -330,6 +346,13 @@ def assemble_fake_drugs(
     return dar, dnar, ground_truth
 
 
+def assemble_fake_gaussian_general(m_null, p0, p1, extra_params, m_alt=None):
+    raise NotImplementedError("Gaussian LLR not implemented yet.")
+    dar, dnar, ground_truth = assemble_fake_gaussian(
+        extra_params["max_magnitude"], m_null, p0, p1, m_alt
+    )
+    return {"dar": dar, "dnar": dnar}, ground_truth
+
 def assemble_fake_gaussian(max_magnitude, m_null, p0, p1, m_alt=None):
     """Assembles dar and dnar for fake gaussian."""
     var_vec_true = np.linspace(1, max_magnitude, m_null)
@@ -354,9 +377,18 @@ def assemble_fake_gaussian(max_magnitude, m_null, p0, p1, m_alt=None):
     return mean_vec, sd_vec, ground_truth
 
 
+def assemble_fake_binom_general(
+        m_null:int,interleaved:bool, 
+        theta0:float, theta1:float, 
+        extra_params: Dict[str, Union[float, pd.Series]], m_alt: Optional[int]=None)-> Tuple[Dict[str, pd.Series], pd.Series]:
+    binom_probs, n_events, ground_truth = assemble_fake_binom(
+        m_null, interleaved, theta0, theta1, m_alt, n_events=extra_params["n_events"],
+    )
+    return {"binom_probs": binom_probs, "n_events": n_events}, ground_truth
+
 def assemble_fake_binom(
-    m_null: int, interleaved: bool, p0: float, p1: float, m_alt: Optional[int] = None
-) -> (pd.Series, pd.Series):
+    m_null: int, interleaved: bool, p0: float, p1: float, m_alt: Optional[int] = None, n_events: int = 1,
+) -> Tuple[pd.Series, pd.Series]:
     """Assembles dar and dnar for fake drugs."""
     if m_alt is None:
         drug_names = gen_names(2 * m_null)
@@ -384,9 +416,25 @@ def assemble_fake_binom(
             )
 
     # Create (non) amensia magnitude
-    dar = p0 * ground_truth + p1 * ~ground_truth
-    return dar, ground_truth
+    binom_probs = p0 * ground_truth + p1 * ~ground_truth
+    n_events = np.repeat(n_events, len(binom_probs))
+    return binom_probs, n_events, ground_truth
 
+
+
+
+def assemble_fake_pois_general(
+    m_null: int,
+    interleaved: bool,
+    theta0: float,
+    theta1: float,
+    m_alt: Optional[int] = None,
+    extra_params: Dict[str, Union[float, pd.Series]] = None,
+) -> Tuple[Dict[str, pd.Series], pd.Series]:
+    pois_rate, ground_truth = assemble_fake_pois(
+        m_null, interleaved, theta0, theta1, m_alt
+    )
+    return {"pois_rate": pois_rate}, ground_truth
 
 def assemble_fake_pois(
     m_null: int,
@@ -394,7 +442,7 @@ def assemble_fake_pois(
     p0: float,
     p1: float,
     m_alt: Optional[int] = None,
-) -> (pd.Series, pd.Series):
+) -> Tuple[pd.Series, pd.Series]:
     """Assembles dar and dnar for fake drugs.
 
     Args:
@@ -472,7 +520,7 @@ def simulate_reactions(
     sim_amnesia_reactions = pd.DataFrame(
         dict(
             [
-                (drug_name, poisson.rvs(individual_drug_rate, size=n_periods))
+                (drug_name, stats.poisson.rvs(individual_drug_rate, size=n_periods))
                 if individual_drug_rate > 0
                 else (drug_name, np.zeros(n_periods))
                 for drug_name, individual_drug_rate in drug_amnesia_rate.items()
@@ -483,7 +531,7 @@ def simulate_reactions(
     sim_nonamnesia_reactions = pd.DataFrame(
         dict(
             [
-                (drug_name, poisson.rvs(individual_drug_rate, size=n_periods))
+                (drug_name, stats.poisson.rvs(individual_drug_rate, size=n_periods))
                 if individual_drug_rate > 0
                 else (drug_name, np.zeros(n_periods))
                 for drug_name, individual_drug_rate in drug_nonamnesia_rate.items()
@@ -510,7 +558,7 @@ def simulate_binom(bin_props: pd.Series, n_periods: int) -> pd.DataFrame:
     """Generates cumulative success counts for binomial processes."""
     out_dict = {}
     for hyp_name, hyp_prop in bin_props.items():
-        out_dict[hyp_name] = binom.rvs(1, hyp_prop, size=n_periods)
+        out_dict[hyp_name] = stats.binom.rvs(1, hyp_prop, size=n_periods)
     return pd.DataFrame(out_dict).cumsum().reindex(columns=bin_props.index)
 
 
@@ -519,7 +567,7 @@ def simulate_pois(pois_rates: pd.Series, n_periods:int)->pd.DataFrame:
         pd.DataFrame(
             dict(
                 [
-                    (hyp_name, poisson.rvs(hyp_rate, size=n_periods))
+                    (hyp_name, stats.poisson.rvs(hyp_rate, size=n_periods))
                     for hyp_name, hyp_rate in pois_rates.items()
                 ]
             )
@@ -600,17 +648,17 @@ def generate_llr(
     cummax=False,
 ):
     if (hyp_type is None) or (hyp_type == "drug"):
-        amnesia, nonamnesia = simulate_correlated_reactions(
+        amnesia, nonamnesia = simulate_correlated_reactions_full_sig(
             dar, dnar, n_periods, rho, m1, rho1, rand_order=rand_order
         )
         llr = assemble_drug_llr((amnesia, nonamnesia), p0, p1)
     elif hyp_type == "binom":
-        event_count = simulate_correlated_binom(
+        event_count = simulate_correlated_binom_full_sig(
             dar, n_periods, rho, m1, rho1, rand_order=rand_order
         )
         llr = assemble_binom_llr(event_count, p0, p1)
     elif hyp_type == "pois":
-        event_count = simulate_correlated_pois(
+        event_count = simulate_correlated_pois_full_sig(
             dar, n_periods, rho, m1, rho1, rand_order=rand_order
         )
         llr = assemble_pois_llr(event_count, p0, p1)
@@ -625,6 +673,199 @@ def generate_llr(
         return llr.cummax()
     else:
         return llr
+    
+
+# New versions
+import pytest
+
+def construct_dgp(
+        m_null: int,
+        m_alt: int,
+        theta0: float,
+        theta1: float,
+        interleaved: bool,
+        hyp_type: Literal["binom", "pois"],
+        extra_params: Optional[Dict[str, float]]= None,
+) -> Tuple[Dict[str, pd.Series], pd.Series]:
+    """Construct generating parameters and ground truth for a given hypothesis type.
+
+    Args:
+        m_null (int): number of true null hypotheses
+        m_alt (int): number of true alternative hypotheses
+        theta0 (float): test parameter value for nulls.
+        theta1 (float): test parameter value for alternatives.
+        interleaved (bool): whether to interleave null and alternative hypotheses. if true, hyp0 
+            will but true, hyp1 will be false, etc until 2 * min(m_null, m_alt), etc. Otherwise, 0 through m_null-1 will be true and the rest false.
+        hyp_type (Literal[&quot;drug&quot;, &quot;binom&quot;, &quot;pois&quot;]): only supports binom or pois for now.
+        extra_params (Dict[str, Union[float, pd.Series]]): any additional parameters.
+
+    Returns:
+        Tuple[Dict[str, pd.Series], pd.Series]: _description_
+    """
+    if extra_params is None:
+        extra_params = {}
+    if m_alt is None:
+        m_alt = m_null
+    hyp_names = gen_names(m_null + m_alt)
+    
+    if interleaved:
+        ground_truth = pd.Series(
+            build_interleaved_ground_truth(m_null, m_alt), index=hyp_names
+        )
+    else:
+        ground_truth = pd.Series(
+            np.repeat(np.array([True, False]), [m_null, m_alt]), index=hyp_names
+        )
+    if hyp_type=="binom":
+        binom_probs = theta0 * ground_truth + theta1 * ~ground_truth
+        n_events = pd.Series(np.repeat(extra_params["n"], len(binom_probs)), index=hyp_names)
+        if len(extra_params)>1:
+            warnings.warn("Extra parameters not used.")
+        return {"p": binom_probs, "n": n_events}, ground_truth
+    elif hyp_type=="pois":
+        pois_rate = theta0 * ground_truth + theta1 * ~ground_truth
+        if len(extra_params)>0:
+            warnings.warn("Extra parameters not used.", UserWarning)
+        return {"mu": pois_rate}, ground_truth
+    else:
+        raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
+    
+
+
+def check_params(hyp_type: Literal["drug", "pois", "binom"], params: Dict[str, pd.Series]) -> pd.Index:
+    """Confirms that the right keys are present in the params dictionary, and returns the names of the hypotheses.
+
+    Args:
+        hyp_type (Literal[&quot;drug&quot;, &quot;pois&quot;, &quot;binom&quot;]): _description_
+        params (Dict[str, pd.Series]): _description_
+
+    Raises:
+        ValueError: _description_
+
+    Returns:
+        pd.Index: index of hypothesis names
+    """
+    if hyp_type == "drug":
+        assert len(params) == 2, "Drug type must have exactly 2 parameters."
+        assert "amnesia_rate" in params, "Drug type must have an 'amnesia_rate' parameter."
+        assert "non_amnesia_rate" in params, "Drug type must have a 'non_amnesia_rate' parameter."
+        assert len(params["amnesia_rate"]) == len(params["non_amnesia_rate"]), "amnesia_rate and non_amnesia_rate must have the same length."
+        return (params["amnesia_rate"]).index
+    elif hyp_type == "pois":
+        assert len(params) == 1, "Poisson type must have exactly 1 parameter."
+        assert "mu" in params, "Poisson type must have a lambda parameter."
+        return (params["mu"]).index
+    elif hyp_type == "binom":
+        assert len(params) == 2, "Binomial type must have exactly 2 parameters."
+        assert "p" in params, "Binomial type must have a p parameter."
+        assert "n" in params, "Binomial type must have a n parameter."
+        assert len(params["p"]) == len(params["n"]), "n and p must have the same length."
+        return (params["p"]).index
+    else:
+        raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
+
+def simple_toeplitz_corr_mat(rho:float, m:int, rand_order:bool=False) -> np.ndarray:
+    """Construct correlation matrix with symmetric neighboring connections."""
+    raw_corr_mat = toeplitz(rho ** abs(np.arange(m)))
+    if rand_order:
+        ordering = numpy.random.permutation(np.arange(m))
+        corr_mat = (raw_corr_mat[ordering, :])[:, ordering]
+        return corr_mat
+    else:
+        return raw_corr_mat
+    
+
+    
+def simulate_correlated_observations(
+        params: Dict[str, pd.Series], 
+        n_periods:int, 
+        rho:float, 
+        hyp_type: Literal["binom", "pois"], 
+        rand_order:bool=False)-> pd.DataFrame:
+    
+    hyp_idx = check_params(hyp_type, params)
+    cov_mat = simple_toeplitz_corr_mat(rho, len(hyp_idx), rand_order)
+    unif_draw = pd.DataFrame(
+        stats.norm.cdf(stats.multivariate_normal(cov=cov_mat).rvs(size=n_periods)),
+        columns=hyp_idx,
+    )
+    unif_draw.index.name = "period"
+
+    if hyp_type == "binom":
+        dist = stats.binom(**params)
+    elif hyp_type == "pois":
+        dist = stats.poisson(**params)
+    else:
+        raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
+    obs = pd.DataFrame(dist.ppf(unif_draw), columns=hyp_idx, index=unif_draw.index)
+    
+    return obs
+
+
+def compute_llr(
+    observed_data: pd.DataFrame, 
+    hyp_type: Literal["drug", "binom", "pois", "gaussian"], 
+    params0: Dict[str, pd.Series],
+    params1: Dict[str, pd.Series])-> pd.DataFrame:
+    """Computes the log likelihood ratio for each hypothesis at each timestep.
+    
+    Computes manually using hard derived formulae.
+    
+    Args:
+        observed_data (pd.DataFrame): Observed data.
+        hyp_type (Literal["drug", "binom", "pois", "gaussian"]): Type of hypothesis to generate data for.
+        theta0 (Union[float, pd.Series]): Null hypothesis parameter.
+        theta1 (Union[float, pd.Series]): Alternative hypothesis parameter.
+        extra_params (Optional[Dict[str, Any]]): Extra parameters for the hypothesis.
+
+    Returns:
+        pd.DataFrame: LLR paths. Index is the period, columns are the hypotheses.
+    """
+    time_idx = pd.DataFrame(pd.Series(np.arange(1, len(observed_data) + 1), index=observed_data.index))
+    if hyp_type == "binom":
+        cum_pos_obs = observed_data.cumsum()
+        cum_total_obs = time_idx.dot(pd.DataFrame(params0["n"]).T)
+        cum_neg_obs =  cum_total_obs - cum_pos_obs
+        llr = cum_pos_obs.multiply(np.log(params1["p"] / params0["p"])) + cum_neg_obs.multiply(np.log((1 - params1["p"]) / (1 - params0["p"])))
+    elif hyp_type == "pois":
+        cum_obs = observed_data.cumsum()
+        llr = cum_obs.multiply( np.log(params1["mu"] / params0["mu"])) - (time_idx.dot(pd.DataFrame(params1["mu"] - params0["mu"]).T))
+    else:
+        raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
+    return llr
+
+def generate_llr_general(
+    params: Dict[str, pd.Series],
+    n_periods: int,
+    rho: Optional[float],
+    hyp_type: Literal["drug", "binom", "pois", "gaussian"],
+    params0: Dict[str, pd.Series],
+    params1: Dict[str, pd.Series],
+    rand_order:bool=False,
+    # extra_params: Optional[Dict[str, Any]]=None,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Main func for generating data and llr paths.
+    
+    Args:
+        params (Dict[str, pd.Series]): Dictionary of relevant parameters for dgp. Must have keys corresponding to the required values in hyp_type.
+        n_periods (int): Number of periods to simulate.
+        rho (Optional[float]): Correlation coefficient. Defaults to None.
+        hyp_type (Literal["drug", "binom", "pois", "gaussian"]): Type of hypothesis to generate data for.
+        theta0 (Union[float, pd.Series]): Null hypothesis parameter.
+        theta1 (Union[float, pd.Series]): Alternative hypothesis parameter.
+        rand_order (bool, optional): Whether to randomly order drugs. Defaults to False.
+        extra_params (Optional[Dict[str, Any]], optional): Extra parameters for the hypothesis. 
+            Constant across hypotheses and true for both null and alternative.
+
+    Returns:
+        Tuple of 2 pd.DataFrames: LLR paths and observed data, respectively
+    """
+    check_params(hyp_type, params)
+    
+    observed_data = simulate_correlated_observations(params, n_periods, rho, hyp_type, rand_order=rand_order)
+    llr = compute_llr(observed_data, hyp_type, params0=params0, params1=params1)
+    assert llr.shape == observed_data.shape, f"LLR and observed data shapes do not match: {llr.shape} and {observed_data.shape}."
+    return llr, observed_data
 
 
 def whole_data_p0(N_amnesia, N_reports):
@@ -679,8 +920,33 @@ def toep_corr_matrix(m, rho, m1=None, rho1=None, rand_order=False):
         #        print(outmat.round(1))
         return outmat
 
-
 def simulate_correlated_reactions(
+    params: Dict[str, pd.Series],
+    n_periods:int,
+    rho:float,
+    m1: Optional[int]=None,
+    rho1:Optional[float]=None,
+    rand_order:bool=False,
+)-> pd.DataFrame:
+    """Simulates correlated drug reactions.
+
+    Args:
+        params (Dict[str, pd.Series]): Dictionary of drug reaction rates. Must have keys "dar" and "dnar".
+        n_periods (int): Number of periods to simulate.
+        rho (float): Correlation coefficient.
+        m1 (Optional[int], optional): Number of drugs with different correlation. Defaults to None.
+        rho1 (Optional[float], optional): Correlation coefficient for drugs with different correlation. Defaults to None.
+        rand_order (bool, optional): Whether to randomly order drugs. Defaults to False.
+
+    Returns:
+        _type_: _description_
+    """
+    assert "dar" in params, "dar must be in params"
+    assert "dnar" in params, "dnar must be in params"
+    assert len(params["dar"]) == len(params["dnar"]), "dar and dnar must have the same length"
+    return simulate_correlated_reactions_full_sig(**params, n_periods=n_periods, rho=rho, m1=m1, rho1=rho1, rand_order=rand_order)
+
+def simulate_correlated_reactions_full_sig(
     drug_amnesia_rate,
     drug_nonamnesia_rate,
     n_periods,
@@ -700,11 +966,11 @@ def simulate_correlated_reactions(
         # toeplitz(rho** abs(np.arange(len(drug_amnesia_rate))))
         # cov_mat[np.arange(0, N_reports, 5)[:,np.newaxis], np.arange(0, N_reports, 5)] = cov_mat[np.arange(0, N_reports, 5)[:,np.newaxis], np.arange(0, N_reports, 5)]**0.5
         uuA = pd.DataFrame(
-            norm.cdf(multivariate_normal(cov=cov_mat).rvs(size=n_periods)),
+            stats.norm.cdf(stats.multivariate_normal(cov=cov_mat).rvs(size=n_periods)),
             columns=drug_amnesia_rate.index,
         )
         uuB = pd.DataFrame(
-            norm.cdf(multivariate_normal(cov=cov_mat).rvs(size=n_periods)),
+            stats.norm.cdf(stats.multivariate_normal(cov=cov_mat).rvs(size=n_periods)),
             columns=drug_amnesia_rate.index,
         )
 
@@ -714,7 +980,7 @@ def simulate_correlated_reactions(
         sim_amnesia_reactions = pd.DataFrame(
             dict(
                 [
-                    (drug_name, poisson.ppf(uuA[drug_name], individual_drug_rate))
+                    (drug_name, stats.poisson.ppf(uuA[drug_name], individual_drug_rate))
                     if individual_drug_rate > 0
                     else (drug_name, np.zeros(n_periods))
                     for drug_name, individual_drug_rate in drug_amnesia_rate.items()
@@ -725,7 +991,7 @@ def simulate_correlated_reactions(
         sim_nonamnesia_reactions = pd.DataFrame(
             dict(
                 [
-                    (drug_name, poisson.ppf(uuB[drug_name], individual_drug_rate))
+                    (drug_name, stats.poisson.ppf(uuB[drug_name], individual_drug_rate))
                     if individual_drug_rate > 0
                     else (drug_name, np.zeros(n_periods))
                     for drug_name, individual_drug_rate in drug_nonamnesia_rate.items()
@@ -753,22 +1019,48 @@ def simulate_correlated_reactions(
 #     return simulate_correlated_gaussian_noncum_internal(pd.DataFrame({"mean":dar, "sd":dnar}), n_periods, rho,
 #                                                         m1=m1, rho1=rho1, rand_order=rand_order)
 
-
 def simulate_correlated_binom(
-    bin_props, n_periods, rho, m1=None, rho1=None, rand_order=False
+    params: Dict[str, pd.Series], 
+    n_periods:int, 
+    rho:float, 
+    m1: Optional[int]=None, 
+    rho1: Optional[float]=None, 
+    rand_order:bool =False,
+) -> pd.DataFrame:
+    """Simulates correlated binomial processes.
+
+    Args:
+        params (Dict[str, pd.Series]): Dictionary of binomial parameters. Must have keys "bin_prop".
+        n_periods (int): Number of periods to simulate.
+        rho (float): Correlation coefficient.
+        m1 (Optional[int], optional): Number of drugs with different correlation. Defaults to None.
+        rho1 (Optional[float], optional): Correlation coefficient for drugs with different correlation. Defaults to None.
+        rand_order (bool, optional): Whether to randomly order drugs. Defaults to False.
+
+    Returns:
+        pd.DataFrame: DataFrame of binomial processes.
+    """
+    assert "bin_prop" in params, "bin_prop must be in params"
+    assert "n_events" in params, "n_events must be in params"
+    assert len(params["bin_prop"]) == len(params["n_events"]), "bin_prop and n_events must have the same length"
+    return simulate_correlated_binom_full_sig(**params, n_periods=n_periods, rho=rho, m1=m1, rho1=rho1, rand_order=rand_order)
+
+
+def simulate_correlated_binom_full_sig(
+    n_events, bin_props, n_periods, rho, m1=None, rho1=None, rand_order=False,
 ):
     cov_mat = toep_corr_matrix(len(bin_props), rho, m1, rho1, rand_order=rand_order)
     # toeplitz(rho** abs(np.arange(len(bin_props))))
     # cov_mat[np.arange(0, N_reports, 5)[:,np.newaxis], np.arange(0, N_reports, 5)] = cov_mat[np.arange(0, N_reports, 5)[:,np.newaxis], np.arange(0, N_reports, 5)]**0.5
     uuA = pd.DataFrame(
-        norm.cdf(multivariate_normal(cov=cov_mat).rvs(size=n_periods)),
+        stats.norm.cdf(stats.multivariate_normal(cov=cov_mat).rvs(size=n_periods)),
         columns=bin_props.index,
     )
     return (
         pd.DataFrame(
             dict(
                 [
-                    (hyp_name, binom.ppf(uuA[hyp_name], 1, hyp_prop))
+                    (hyp_name, stats.binom.ppf(uuA[hyp_name], n_events, hyp_prop))
                     for hyp_name, hyp_prop in bin_props.items()
                 ]
             )
@@ -777,22 +1069,46 @@ def simulate_correlated_binom(
         .reindex(columns=bin_props.index)
     )
 
-
 def simulate_correlated_pois(
+    params: Dict[str, pd.Series],
+    n_periods:int,
+    rho:float,
+    m1: Optional[int]=None,
+    rho1: Optional[float]=None,
+    rand_order:bool=False,
+) -> pd.DataFrame:
+    """Simulates correlated poisson processes.
+
+    Args:
+        params (Dict[str, pd.Series]): Dictionary of poisson rates. Must have keys "pois_rate".
+        n_periods (int): Number of periods to simulate.
+        rho (float): Correlation coefficient.
+        m1 (Optional[int], optional): Number of drugs with different correlation. Defaults to None.
+        rho1 (Optional[float], optional): Correlation coefficient for drugs with different correlation. Defaults to None.
+        rand_order (bool, optional): Whether to randomly order drugs. Defaults to False.
+
+    Returns:
+        pd.DataFrame: DataFrame of poisson processes.
+    """
+    assert "pois_rate" in params, "pois_rate must be in params"
+    return simulate_correlated_pois_full_sig(**params, n_periods=n_periods, rho=rho, m1=m1, rho1=rho1, rand_order=rand_order)
+
+
+def simulate_correlated_pois_full_sig(
     pois_rates, n_periods, rho, m1=None, rho1=None, rand_order=False
 ):
     cov_mat = toep_corr_matrix(len(pois_rates), rho, m1, rho1, rand_order=rand_order)
     # toeplitz(rho** abs(np.arange(len(pois_rates))))
     # cov_mat[np.arange(0, N_reports, 5)[:,np.newaxis], np.arange(0, N_reports, 5)] = cov_mat[np.arange(0, N_reports, 5)[:,np.newaxis], np.arange(0, N_reports, 5)]**0.5
     uuA = pd.DataFrame(
-        norm.cdf(multivariate_normal(cov=cov_mat).rvs(size=n_periods)),
+        stats.norm.cdf(stats.multivariate_normal(cov=cov_mat).rvs(size=n_periods)),
         columns=pois_rates.index,
     )
     return (
         pd.DataFrame(
             dict(
                 [
-                    (hyp_name, poisson.ppf(uuA[hyp_name], hyp_rate))
+                    (hyp_name, stats.poisson.ppf(uuA[hyp_name], hyp_rate))
                     for hyp_name, hyp_rate in pois_rates.items()
                 ]
             )
@@ -890,21 +1206,22 @@ class infinite_dgp_wrapper(df_dgp_wrapper):
 
     def __init__(self, gen_llr_kwargs, drop_old_data=True):
         self._gen_kwargs = gen_llr_kwargs
-        self._df = generate_llr(**gen_llr_kwargs)
-        self._iter_rows = self._df.iterrows()
+        self._llr_df, self._obs_df = generate_llr_general(**gen_llr_kwargs)
+        assert self._llr_df.shape==self._obs_df.shape, "LLR and observed data must have the same shape."
+        self._iter_rows = self._llr_df.iterrows()
         self._drop_old_data = drop_old_data
 
     def __call__(self, col_list):
         try:
             _, data_ser = next(self._iter_rows)
         except StopIteration as ex:
-            last_val = self._df.iloc[-1]
-            new_df = generate_llr(**self._gen_kwargs) + last_val
+            last_val = self._llr_df.iloc[-1]
+            new_df = generate_llr_general(**self._gen_kwargs) + last_val
             if self._drop_old_data:
-                self._df = new_df
+                self._llr_df = new_df
             else:
-                self._df = pd.concat((self._df, new_df))
-                self._df.reset_index(inplace=True, drop=True)
+                self._llr_df = pd.concat((self._llr_df, new_df))
+                self._llr_df.reset_index(inplace=True, drop=True)
             self._iter_rows = new_df.iterrows()
             _, data_ser = next(self._iter_rows)
         return data_ser[col_list]
@@ -914,4 +1231,4 @@ class infinite_dgp_wrapper(df_dgp_wrapper):
         if self._drop_old_data:
             raise ValueError("DGP drops old data. Cannot return full record.")
         else:
-            return self._df
+            return self._llr_df

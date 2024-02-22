@@ -9,3 +9,4 @@ pymysql
 cryptography
 pyarrow
 cloud-sql-python-connector[pymysql]
+google-cloud-logging
