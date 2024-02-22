@@ -126,7 +126,7 @@ def get_oc_range_wrapper(p0, p1,
 def fixed_sample_pval(hyp_type, dar, dnar, drr, rho, p0, p1, n_periods, halfp):
                 # Generate data
     if (hyp_type is None) or (hyp_type=="drug"):
-        amnesia_ts, nonamnesia_ts = data_funcs.simulate_correlated_reactions(n_periods * dar, n_periods * dnar, 2, rho, halfp)
+        amnesia_ts, nonamnesia_ts = data_funcs.simulate_correlated_reactions_full_sig(n_periods * dar, n_periods * dnar, 2, rho, halfp)
         llr_ts = data_funcs.assemble_llr(amnesia_ts, nonamnesia_ts, p0, p1)
         llr = llr_ts.iloc[-1]
         amnesia = amnesia_ts.iloc[0]
@@ -136,13 +136,13 @@ def fixed_sample_pval(hyp_type, dar, dnar, drr, rho, p0, p1, n_periods, halfp):
         Z_scores = (llr - nrm_approx["term_mean"]) / np.sqrt(nrm_approx["term_var"])
         p_val = pd.Series(1 - stats.norm.cdf(Z_scores), index=dar.index)
     elif hyp_type == "binom":
-        amnesia_ts = data_funcs.simulate_correlated_binom(dar, n_periods, rho)
+        amnesia_ts = data_funcs.simulate_correlated_binom_full_sig(dar, n_periods, rho)
         amnesia = pd.DataFrame(amnesia_ts).iloc[-1]
         p_val = pd.Series(dict([(drug_name, single_binom_test(amnesia_val, n_periods, p0, p1, halfp=halfp)) for drug_name, amnesia_val in amnesia.items()]))
         #llr = data_funcs.assemble_binom_llr(amnesia, p0, p1).iloc[0]
         #nrm_approx = llr_binom_term_moments(p0, p1) * n_periods
     elif hyp_type == "pois":
-        amnesia_ts = data_funcs.simulate_correlated_pois(dar, n_periods, rho)
+        amnesia_ts = data_funcs.simulate_correlated_pois_full_sig(dar, n_periods, rho)
         amnesia = pd.DataFrame(amnesia_ts).iloc[-1]
         
         p_val = pd.Series(dict([(drug_name, single_pois_test(amnesia_val, n_periods * p0, n_periods * p1, halfp=halfp)) for drug_name, amnesia_val in amnesia.items()]))

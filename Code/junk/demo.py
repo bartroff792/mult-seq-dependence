@@ -15,9 +15,9 @@ import string
 from tqdm import tqdm
 from utils import cutoff_funcs
 from utils.cutoff_funcs import (finite_horizon_rejective_cutoffs, 
-                                create_fdr_controlled_alpha, guo_rao_stepdown_fdr_level)
+                                apply_fdr_controlled_alpha, guo_rao_stepdown_fdr_level)
 from utils.data_funcs import (read_drug_data, simulate_reactions, assemble_llr, 
-                              simulate_correlated_reactions, 
+                              simulate_correlated_reactions_full_sig, 
                               assemble_fake_drugs)
 from utils.simulation_funcs import calc_sim_cutoffs
 from utils import data_funcs, cutoff_funcs
@@ -153,7 +153,7 @@ def infinite_horizon_seq_stepdown_plot(alpha=.1, beta=.2,
     print("p0: {0}".format(p0))
     print("p1: {0}".format(p1))
     # Generate data
-    amnesia, nonamnesia = simulate_correlated_reactions(dar, 
+    amnesia, nonamnesia = simulate_correlated_reactions_full_sig(dar, 
                                                         dnar, 
                                                         n_periods,
                                                         rho)
@@ -201,7 +201,7 @@ def finite_horizon_seq_stepdown_plot(alpha=.1, n_periods=1000,BH=True, record_in
 ##    n_periods = 10
 #    n_periods = est_periods
     # Generate data
-    amnesia, nonamnesia = simulate_correlated_reactions(dar, 
+    amnesia, nonamnesia = simulate_correlated_reactions_full_sig(dar, 
                                                         dnar, 
                                                         n_periods,
                                                         rho)
@@ -218,7 +218,7 @@ def finite_horizon_seq_stepdown_plot(alpha=.1, n_periods=1000,BH=True, record_in
     else:        
         alpha_vec_raw = alpha / (float(N_drugs) - arange(N_drugs))
     if do_scale:
-        scaled_alpha_vec = create_fdr_controlled_alpha(alpha, alpha_vec_raw)
+        scaled_alpha_vec = apply_fdr_controlled_alpha(alpha, alpha_vec_raw)
     else:
         scaled_alpha_vec = alpha_vec_raw
 

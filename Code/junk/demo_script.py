@@ -21,7 +21,7 @@ alpha_fdr = .1
 beta_fdr = .05
 N = 10
 
-alpha_vec = cutoff_funcs.create_fdr_controlled_alpha(alpha_fdr, 
+alpha_vec = cutoff_funcs.apply_fdr_controlled_alpha(alpha_fdr, 
                                                      arange(1.0, 1.0 + N))
-beta_vec = cutoff_funcs.create_fdr_controlled_alpha(beta_fdr, 
+beta_vec = cutoff_funcs.apply_fdr_controlled_alpha(beta_fdr, 
                                                     arange(1.0, 1.0 + N))

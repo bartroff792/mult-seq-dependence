@@ -659,6 +659,79 @@ def finite_horizon_cutoff_simulation_general(
     return out_rec, weight_out
 
 
+def finite_horizon_rejective_cutoffs_general(
+    params0: Dict[str, Any],
+    params1: Dict[str, Any],
+    alpha_levels: FloatArray,
+    n_periods: int,
+    k_reps: int,
+    hyp_type: HypTypes,
+    # sleep_time=5,
+    normal_approx: bool = False,
+    imp_sample: bool = True,
+    imp_sample_prop=0.5,
+    # imp_sample_hedge=0.9,
+    # divide_cores=None,
+):
+    """Calculate finite horizon rejective cutoffs from alpha levels using MC."""
+    # Run simulation k_reps times
+    # TODO: what is happening here?
+    record, weights = finite_horizon_cutoff_simulation_general(
+        params0,
+        params1,
+        hyp_type,
+        n_periods,
+        k_reps,
+        imp_sample=imp_sample,
+        imp_sample_prop=imp_sample_prop,
+        # imp_sample_hedge=imp_sample_hedge,
+    )
+    assert record.shape==weights.shape, f"record shape {record.shape} does not match weights shape {weights.shape}."
+    m_hyps = record.shape[-1]
+    # Get the cutoffs for each individual stream, either exact or using a tdist
+    if normal_approx:
+        warnings.warn("Using normal approximation for quantile estimation.")
+
+        #        fit_vals = [tdist.fit(record[:,ii]) for ii in tqdm(range(len(rate_data)), desc="t dist fits")]
+        #        stream_specific_cutoff_levels = array([tdist(*t_dist_vals).ppf(1-alpha_levels) for t_dist_vals in tqdm(fit_vals, desc="t dist quantiles")])
+
+        fit_vals = [
+            stats.norm.fit(record[:, ii])
+            for ii in tqdm(range(m_hyps), desc="t dist fits")
+        ]
+        stream_specific_cutoff_levels = np.array(
+            [
+                stats.norm(*dist_vals).ppf(1 - alpha_levels)
+                for dist_vals in tqdm(fit_vals, desc="t dist quantiles")
+            ]
+        )
+    stream_specific_cutoff_levels = empirical_quant_presim_wrapper(
+        {
+            "record": record,
+            "weights": weights,
+            "alpha_levels": alpha_levels,
+            "job_id": 0,
+        }
+    )
+
+    # Take the max across streams for each cutoff.
+    # Take A_j = max_i A_j^i, then
+    # P(Lambda^i > A_j) < P(Lambda^i > A_j^i) < alpha_j
+    cutoff_levels = stream_specific_cutoff_levels.max(1)
+
+    #    from IPython.display import display
+    #    display(cutoff_levels)
+
+    if (cutoff_levels < 0).any():
+        num_neg = (cutoff_levels < 0).sum()
+
+        warnings.warn(
+            "{0} Cutoff levels are negative: from {1} to {2}".format(
+                num_neg, cutoff_levels.min(), cutoff_levels.max()
+            )
+        )
+
+    return cutoff_levels
 
 
 def finite_horizon_cutoff_simulation(

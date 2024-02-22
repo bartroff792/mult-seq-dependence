@@ -613,29 +613,19 @@ def calc_sim_cutoffs(
         k_reps = int(1.0 / float(undershoot_prob * min_alpha_diff))
 
         #        raise ValueError("Alpha min {0} max {1}".format(scaled_alpha_vec.min(), scaled_alpha_vec.max()))
-        A_vec = cutoff_funcs.finite_horizon_rejective_cutoffs(
-            drr,
-            p0,
-            p1,
-            scaled_alpha_vec,
-            n_periods,
-            k_reps,
-            do_parallel=fin_par,
+        A_vec = cutoff_funcs.finite_horizon_rejective_cutoffs_general(
+            params0=params0,
+            params1=params1,
             hyp_type=hyp_type,
-            sleep_time=fh_sleep_time,
+            n_periods=n_periods,
+            alpha_levels=scaled_alpha_vec,
+            k_reps=k_reps,
             normal_approx=fh_cutoff_normal_approx,
             imp_sample=fh_cutoff_imp_sample,
             imp_sample_prop=fh_cutoff_imp_sample_prop,
-            imp_sample_hedge=fh_cutoff_imp_sample_hedge,
-            divide_cores=divide_cores,
         )
-        #        if stepup:
-        #            print("-"*10)
-        #            print("cummax", cummax)
-        #            print("scaled_alpha", scaled_alpha_vec)
-        #            print("A_Vec", A_vec)
-        #            print("-"*10)
-        B_vec = None
+
+        # B_vec = None
         cutoff_df = pd.DataFrame({"A": A_vec,})
 
     return cutoff_df, n_periods
