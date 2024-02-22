@@ -8,6 +8,27 @@ def test_confirm_cummax_consistency():
     # generate_llr_general is htat outputting step data or cum obs data?
     assert False
 
+class TestComputeLLR:
+    def test_binom_stepwise(self):
+
+        hyp_idx = pd.Index(["a", "b", "c"], name="hyp_name")
+        params = {
+            "p": pd.Series([0.1, 0.2, 0.3], index=hyp_idx),
+            "n": pd.Series(n, index=hyp_idx),
+        }
+        params0 = copy.deepcopy(params)
+        params0["p"][:] = 0.1
+        params1 = copy.deepcopy(params)
+        params1["p"][:] = 0.3
+        data_funcs.compute_llr()
+        raise ValueError()
+    
+
+    def test_binom_cumulative(self):
+        raise ValueError()
+    
+
+
 class TestConstructDGP:
     def test_binom(self):
         dgp, gt = data_funcs.construct_dgp(

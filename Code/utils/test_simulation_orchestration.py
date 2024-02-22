@@ -53,7 +53,7 @@ class TestMCSimAndAnalyzeSynthData:
             scale_fdr=True,
             rho=-0.5,
             interleaved=False,
-            undershoot_prob=0.2,
+            undershoot_prob=0.98,
             fin_par=True,
             fh_sleep_time=60,
             do_iterative_cutoff_MC_calc=False,

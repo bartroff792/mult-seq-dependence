@@ -806,13 +806,15 @@ def compute_llr(
     observed_data: pd.DataFrame, 
     hyp_type: Literal["drug", "binom", "pois", "gaussian"], 
     params0: Dict[str, pd.Series],
-    params1: Dict[str, pd.Series])-> pd.DataFrame:
+    params1: Dict[str, pd.Series],
+    cumulative=True,
+    )-> pd.DataFrame:
     """Computes the log likelihood ratio for each hypothesis at each timestep.
     
     Computes manually using hard derived formulae.
     
     Args:
-        observed_data (pd.DataFrame): Observed data.
+        observed_data (pd.DataFrame): Observed data. New observation at each timestep, not cumulative.
         hyp_type (Literal["drug", "binom", "pois", "gaussian"]): Type of hypothesis to generate data for.
         theta0 (Union[float, pd.Series]): Null hypothesis parameter.
         theta1 (Union[float, pd.Series]): Alternative hypothesis parameter.
@@ -823,15 +825,26 @@ def compute_llr(
     """
     time_idx = pd.DataFrame(pd.Series(np.arange(1, len(observed_data) + 1), index=observed_data.index))
     if hyp_type == "binom":
-        cum_pos_obs = observed_data.cumsum()
-        cum_total_obs = time_idx.dot(pd.DataFrame(params0["n"]).T)
-        cum_neg_obs =  cum_total_obs - cum_pos_obs
-        llr = cum_pos_obs.multiply(np.log(params1["p"] / params0["p"])) + cum_neg_obs.multiply(np.log((1 - params1["p"]) / (1 - params0["p"])))
+        if cumulative:
+            pos_obs = observed_data.cumsum()
+            total_obs = time_idx.dot(pd.DataFrame(params0["n"]).T)
+            neg_obs =  total_obs - pos_obs
+        else:
+            pos_obs = observed_data
+            neg_obs = params0["n"].subtract(pos_obs)
+            assert pos_obs.shape == neg_obs.shape, f"Positive and negative observations shapes do not match: {pos_obs.shape} and {neg_obs.shape}."
+        llr = pos_obs.multiply(np.log(params1["p"] / params0["p"])) + neg_obs.multiply(np.log((1 - params1["p"]) / (1 - params0["p"])))
     elif hyp_type == "pois":
-        cum_obs = observed_data.cumsum()
-        llr = cum_obs.multiply( np.log(params1["mu"] / params0["mu"])) - (time_idx.dot(pd.DataFrame(params1["mu"] - params0["mu"]).T))
+        if cumulative:
+            obs = observed_data.cumsum()
+            scaled_rate = (time_idx.dot(pd.DataFrame(params1["mu"] - params0["mu"]).T))
+        else:
+            obs = observed_data
+            scaled_rate = params1["mu"] - params0["mu"]
+        llr = obs.multiply( np.log(params1["mu"] / params0["mu"])).subtract(scaled_rate)
     else:
         raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
+    assert llr.shape==observed_data.shape, f"LLR and observed data shapes do not match: {llr.shape} and {observed_data.shape}."
     return llr
 
 def generate_llr_general(
@@ -863,7 +876,7 @@ def generate_llr_general(
     check_params(hyp_type, params)
     
     observed_data = simulate_correlated_observations(params, n_periods, rho, hyp_type, rand_order=rand_order)
-    llr = compute_llr(observed_data, hyp_type, params0=params0, params1=params1)
+    llr = compute_llr(observed_data, hyp_type, params0=params0, params1=params1, cumulative=True)
     assert llr.shape == observed_data.shape, f"LLR and observed data shapes do not match: {llr.shape} and {observed_data.shape}."
     return llr, observed_data
 
