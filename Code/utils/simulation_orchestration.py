@@ -1035,7 +1035,7 @@ def mc_sim_and_analyze_synth_data(
     cut_type="BL",
     theta0:float=0.05,
     theta1:float=0.045,
-    extra_params:Optional[Dict[str, Union[pd.Series, float]]]=None,
+    extra_params:Optional[Dict[str, Union[float, int]]]=None,
     n_periods=None,
     m_null=3,
     m_alt=None,

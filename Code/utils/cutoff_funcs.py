@@ -643,7 +643,10 @@ def finite_horizon_cutoff_simulation_general(
             rand_order=False,
             # extra_params=extra_params,
         )
-        imp_weight = np.exp(data_funcs.compute_llr(observed_data=obs_data, hyp_type=hyp_type, params0=sim_params, params1=params0))
+        log_stepwise_imp_weight = data_funcs.compute_llr(observed_data=obs_data, hyp_type=hyp_type, params0=sim_params, params1=params0, cumulative=False,)
+        log_imp_weight = log_stepwise_imp_weight.sum(0)
+        imp_weight = np.exp(log_imp_weight)
+
         weight_out.append(imp_weight)
 
 

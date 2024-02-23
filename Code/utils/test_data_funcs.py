@@ -4,13 +4,11 @@ from . import data_funcs
 import pytest
 import copy
 
-def test_confirm_cummax_consistency():
-    # generate_llr_general is htat outputting step data or cum obs data?
-    assert False
+
 
 class TestComputeLLR:
     def test_binom_stepwise(self):
-
+        n = 10
         hyp_idx = pd.Index(["a", "b", "c"], name="hyp_name")
         params = {
             "p": pd.Series([0.1, 0.2, 0.3], index=hyp_idx),
@@ -20,12 +18,51 @@ class TestComputeLLR:
         params0["p"][:] = 0.1
         params1 = copy.deepcopy(params)
         params1["p"][:] = 0.3
-        data_funcs.compute_llr()
-        raise ValueError()
+
+        obs = data_funcs.simulate_correlated_observations(
+            params=params,
+            n_periods=50,
+            rho=0.5,
+            hyp_type="binom",
+        )
+        llr = data_funcs.compute_llr(observed_data=obs,
+                               hyp_type="binom",
+                               params0=params0,
+                               params1=params1,
+                               cumulative=False)
+        snr = llr.mean() / llr.std()
+        # Ensure that the relative direction of llr for each
+        # hypothesis is increasing, ie that the final one is more
+        # likely to be rejected than the first
+        assert np.diff(snr).min() > 0.5
     
 
     def test_binom_cumulative(self):
-        raise ValueError()
+        n = 10
+        hyp_idx = pd.Index(["a", "b", "c"], name="hyp_name")
+        params = {
+            "p": pd.Series([0.1, 0.2, 0.3], index=hyp_idx),
+            "n": pd.Series(n, index=hyp_idx),
+        }
+        params0 = copy.deepcopy(params)
+        params0["p"][:] = 0.1
+        params1 = copy.deepcopy(params)
+        params1["p"][:] = 0.3
+
+        obs = data_funcs.simulate_correlated_observations(
+            params=params,
+            n_periods=50,
+            rho=0.5,
+            hyp_type="binom",
+        )
+        llr = data_funcs.compute_llr(observed_data=obs,
+                               hyp_type="binom",
+                               params0=params0,
+                               params1=params1,
+                               cumulative=True)
+        trend = llr.diff().mean()
+        # 
+        assert np.diff(trend).min() > 0.1
     
 
 

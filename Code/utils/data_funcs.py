@@ -718,7 +718,7 @@ def construct_dgp(
         )
     if hyp_type=="binom":
         binom_probs = theta0 * ground_truth + theta1 * ~ground_truth
-        n_events = pd.Series(np.repeat(extra_params["n"], len(binom_probs)), index=hyp_names)
+        n_events = pd.Series(np.repeat(int(extra_params["n"]), len(binom_probs)), index=hyp_names)
         if len(extra_params)>1:
             warnings.warn("Extra parameters not used.")
         return {"p": binom_probs, "n": n_events}, ground_truth
