@@ -1,0 +1,11 @@
+test: 
+  alpha: 0.25
+  beta: 0.1
+  cut_type: BL
+  theta0: 0.05
+  theta1: 0.04
+  m_null: 3
+  m_alt: 7
+  hyp_type: pois
+  sim_reps: 700
+  reps_per_task: 100

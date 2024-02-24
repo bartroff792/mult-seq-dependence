@@ -3,3 +3,5 @@ fix_ssh.sh
 *.pyc
 .vscode/*
 CloudRunner/*
+docker_dev.sh
+.env

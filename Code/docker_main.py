@@ -57,7 +57,7 @@ def connect_with_connector() -> sqlalchemy.engine.base.Engine:
     def getconn() -> pymysql.connections.Connection:
         conn: pymysql.connections.Connection = connector.connect(
             instance_connection_name,
-            "pymysql",
+            driver="pymysql",
             user=db_user,
             password=db_pass,
             db=db_name,
@@ -86,15 +86,15 @@ def get_connection(config):
 
         seed = config.pop("seed", None)
 
-        run_id = config.pop("run_id", None)
+        run_id = config.pop("run_id", 0)
         total_runs = 1
         cloud_execution = ""
     else:
         engine = connect_with_connector()
 
-        run_id = os.environ.get("CLOUD_RUN_TASK_INDEX", None)
-        total_runs = os.environ.get("CLOUD_RUN_TASK_COUNT", None)
-        cloud_execution = os.environ.get("CLOUD_RUN_EXECUTION", "")
+        run_id = os.environ.get("CLOUD_RUN_TASK_INDEX")
+        total_runs = os.environ.get("CLOUD_RUN_TASK_COUNT")
+        cloud_execution = os.environ.get("CLOUD_RUN_EXECUTION")
         assert run_id is not None, "Run ID must be provided"
         assert total_runs is not None, "Total runs must be provided"
         seed = run_id
@@ -158,15 +158,17 @@ def main(parameter_config, run_config):
         except ValueError as ex:
             logging.warn(f"Seed {seed} is not an integer. Using default seed. Error message: {ex}")
 
+    assert run_id is not None, "Run ID must be provided"
+    try:
+        sim_reps = int(sim_reps)
+        total_runs = int(total_runs)
+        run_id = int(run_id)
+    except ValueError as ex:
+        print(f"Error converting sim_reps or total_runs to int. Error message: {ex}")
+        raise
+
     if cloud_execution:
-        assert run_id is not None, "Run ID must be provided"
-        try:
-            sim_reps = int(sim_reps)
-            total_runs = int(total_runs)
-            run_id = int(run_id)
-        except ValueError as ex:
-            print(f"Error converting sim_reps or total_runs to int. Error message: {ex}")
-            raise
+    
         n_reps_per_job = sim_reps // total_runs
         n_jobs_with_extras = sim_reps - (total_runs * n_reps_per_job)
         if run_id < n_jobs_with_extras:
@@ -175,28 +177,49 @@ def main(parameter_config, run_config):
         else:
             job_reps = n_reps_per_job
             start_rep = run_id * job_reps + n_jobs_with_extras
-        if run_id == 1:
-            metadata_df = pd.DataFrame(
-                [
-                    pd.Series(
-                        {
-                            "cloud_execution": cloud_execution,
-                            "run_start": run_start,
-                            "total_runs": total_runs,
-                            "sim_reps": sim_reps,
-                        }
-                    )
-                ]
-            ).set_index("cloud_execution")
-            param_df = pd.DataFrame(
-                [pd.Series(param_dict)],
-                index=pd.Index([cloud_execution], name="cloud_execution"),
-            )
-            param_df.to_sql("params", con=engine, if_exists="append", index=False)
-            metadata_df.to_sql("metadata", con=engine, if_exists="append", index=True)
+    
     else:
         start_rep = 0
         job_reps = sim_reps
+
+    if run_id == 0:
+        metadata_df = pd.DataFrame(
+            [
+                pd.Series(
+                    {
+                        "cloud_execution": cloud_execution,
+                        "run_start": run_start,
+                        "total_runs": total_runs,
+                        "sim_reps": sim_reps,
+                    }
+                )
+            ]
+        ).set_index("cloud_execution")
+        stringified_params = {}
+        for kk, vv in param_dict.items():
+            if kk=="extra_params":
+                stringified_params[kk] = str(vv)
+            else:
+                stringified_params[kk] = vv
+        param_df = pd.DataFrame(
+            [pd.Series(stringified_params)],
+            index=pd.Index([cloud_execution], name="cloud_execution"),
+        )
+        md_df_str = f"Metadata: {metadata_df}"
+        md_dt_str = f"Metadata dtypes: {metadata_df.dtypes}"
+        param_df_str = f"Parameters: {param_df}"
+        param_df_dt_str = f"Parameters dtypes: {param_df.dtypes}"
+        logging.info("Writing metadata and parameters to database")
+        logging.info(md_df_str)
+        logging.info(md_dt_str)
+        logging.info(param_df_str)
+        logging.info(param_df_dt_str)
+        print(md_df_str)
+        print(md_dt_str)
+        print(param_df_str)
+        print(param_df_dt_str)
+        param_df.to_sql("params", con=engine, if_exists="append", index=False)
+        metadata_df.to_sql("metadata", con=engine, if_exists="append", index=True)
 
     # Call your simulation function
 

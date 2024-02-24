@@ -676,8 +676,6 @@ def generate_llr(
     
 
 # New versions
-import pytest
-
 def construct_dgp(
         m_null: int,
         m_alt: int,
