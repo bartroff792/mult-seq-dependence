@@ -218,8 +218,8 @@ def main(parameter_config, run_config):
         print(md_dt_str)
         print(param_df_str)
         print(param_df_dt_str)
-        param_df.to_sql("params", con=engine, if_exists="append", index=False)
-        metadata_df.to_sql("metadata", con=engine, if_exists="append", index=True)
+        param_df.to_sql("simulation_params", con=engine, if_exists="append", index=True)
+        metadata_df.to_sql("simulation_metadata", con=engine, if_exists="append", index=True)
 
     # Call your simulation function
 
