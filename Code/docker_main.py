@@ -127,6 +127,7 @@ def main(parameter_config, run_config):
         rho=parameter_config.pop("rho", -0.5),
         # max_magnitude=parameter_config.pop("max_magnitude", 10.0),
         extra_params=parameter_config.pop("extra_params", {}),
+        error_control=parameter_config.pop("error_control", None),
     )
     if param_dict["extra_params"] is None:
         param_dict["extra_params"] = {}
@@ -224,14 +225,13 @@ def main(parameter_config, run_config):
     # Call your simulation function
 
     # Extract metadata
-
     df = simulation_orchestration.mc_sim_and_analyze_synth_data(
         **param_dict,
         sim_reps=job_reps,
         # Everything after this is hardwired right now.
         # record_interval=100,
         m0_known=False,
-        scale_fdr=True,
+        error_control=param_dict["error_control"],
         interleaved=False,
         undershoot_prob=0.2,
         fin_par=False,
@@ -282,6 +282,7 @@ if __name__ == "__main__":
     parser.add_argument("--m_alt", type=int, help="Number of alternative hypotheses")
     parser.add_argument("--hyp_type", type=str, help="Type of hypothesis")
     parser.add_argument("--sim_reps", type=int, help="Number of simulation repetitions")
+    parser.add_argument("--error_control", type=str, help="Error control method. 'pfdr', 'fdr' or don't pass anything. If nothing is passed, will use unscaled BL cutoffs.")
     # Metadata/launch specific
     parser.add_argument("--cloud", action="store_true", help="Run in cloud mode")
     parser.add_argument("--seed", type=int, help="Random seed for reproducibility")
@@ -295,6 +296,8 @@ if __name__ == "__main__":
     # Add more arguments as needed
 
     args = parser.parse_args()
+    if args.error_control is not None:
+        assert args.error_control in ["pfdr", "fdr"], "Error control must be 'pfdr' or 'fdr'"
 
     # Convert parsed arguments to a dictionary
     config = vars(args)

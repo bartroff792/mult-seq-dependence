@@ -864,7 +864,7 @@ def estimate_finite_horizon_rejective_llr_cutoffs(
     imp_sample: bool = True,
     imp_sample_prop: float = 0.5,
     imp_sample_hedge: Optional[float] = None,
-    # divide_cores=None,
+    clip_at_zero: bool = True,
 ):
     """Calculate finite horizon rejective cutoffs from alpha levels using MC."""
     # Get the max LLR value accross each stream with a weight for each
@@ -900,486 +900,62 @@ def estimate_finite_horizon_rejective_llr_cutoffs(
                 num_neg, cutoff_levels.min(), cutoff_levels.max()
             )
         )
+    EPS = 1e-5
+    # TODO: clipping cutoffs at EPS is serious kludge. Find a better approach here.
+    if clip_at_zero:
+        cutoff_levels[cutoff_levels<EPS] = EPS
     llr_cutoff_verifier(cutoff_levels)
 
     return cutoff_levels
 
 
-# def finite_horizon_cutoff_simulation(
-#     p0: float,
-#     p1: float,
-#     drr: Optional[float] = None,
-#     n_periods: int = 100,
-#     n_reps: int = 1000,
-#     job_id: int = 0,
-#     hyp_type: str = "drug",
-#     imp_sample: bool = True,
-#     imp_sample_prop: float = 0.2,
-#     imp_sample_hedge: float = 0.9,
-# ) -> Tuple[FloatArray, FloatArray]:
-#     """Generate finite horizon sample path maxs (and weights) for MC cutoff estimation.
+# ALPHA_SHIFT = 0.0
 
-#     Allows use of importance sampling to reduce variance of simulation.
 
-#     Args:
-#         p0: null param
-#         p1: alt param
-#         drr: drug response rate (ie overall rate of side effect reports)
-#         n_periods: horizon
-#         n_reps: number of MC reps
-#         job_id: Used for parralelization and reporting
-#         hyp_type: drug, binom, etc
-#         imp_sample: boolean, use importance sampling
-#         imp_sample_prop: p=p1 * q + p0 * (1-q)  as simulation dist param
-#         imp_sample_hedge: proportion of samples to draw from importance
-#             sampling, vs true null
-
-#     Returns:
-#         maxs: array of max llr for each MC rep
-#         weights: array of weights for each MC rep. For a non-importance sampled run, these should be even.
-#             When importance sampling is employed,
-
-#     """
-
-#     out_rec = []
-
-#     # If importance sampling is requested, calculate the simulation parameter
-#     # based on the model type, the hypotheses, and the interpolation parameter.
-#     if imp_sample:
-#         if hyp_type == "drug" or hyp_type == "binom":
-#             sim_param = expit(
-#                 imp_sample_prop * logit(p1) + (1.0 - imp_sample_prop) * logit(p0)
-#             )
-#         elif hyp_type == "pois":
-#             sim_param = np.exp(
-#                 imp_sample_prop * np.log(p1) + (1.0 - imp_sample_prop) * np.log(p0)
-#             )
-#         elif hyp_type == "gaussian":
-#             sim_param = imp_sample_prop * p1 + (1.0 - imp_sample_prop) * p0
-#         else:
-#             raise Exception("Unrecognized hyp type ", hyp_type)
-
-#         weight_out = []
-#         max_imp_samples = int(n_reps * imp_sample_hedge)
-#         do_imp = True
+# def empirical_quant_presim_wrapper(kwargs):
+#     stream_specific_cutoff_levels = []
+#     record = kwargs["record"]
+#     weights = kwargs["weights"]
+#     alpha_levels = kwargs["alpha_levels"]
+#     if "no_left_extrapolate" in kwargs:
+#         left = np.NaN
 #     else:
-#         sim_param = p0
+#         left = None
 
-#         do_imp = False
+#     range_iter = range(record.shape[1])
 
-#     # Set up iterator and logging for parallelization.
-#     logger = logging.getLogger()
-#     if job_id == 0:
-#         logger.setLevel(logging.DEBUG)
-#         range_vec = tqdm(range(n_reps), desc="MC cutoff simulations, Job 0")
-#         logger.debug("Simulating {0} with param {1}".format(hyp_type, sim_param))
-#     else:
-#         logger.setLevel(logging.INFO)
-#         range_vec = range(n_reps)
+#     if ("job_id" not in kwargs) or (kwargs["job_id"] == 0):
+#         range_iter = tqdm(range_iter, desc="Per stream quantile estimation")
 
-#     # Perform MC iterations.
-#     for it, i in enumerate(range_vec):
-#         if it % int(len(range_vec) / 5.0) == 1:
-#             print("job {0} is on {1}".format(job_id, it))
+#     for stream_num in range_iter:
+#         stream_record_raw = record[:, stream_num]
+#         stream_weight_raw = weights[:, stream_num]
+#         stream_idx = np.argsort(stream_record_raw)
+#         stream_record = stream_record_raw[stream_idx]
+#         stream_weight = stream_weight_raw[stream_idx] / stream_weight_raw.sum()
+#         stream_cdf = stream_weight.cumsum() - ALPHA_SHIFT * stream_weight[0]
 
-#         # Switch to true H0 after max_imp_samples
-#         if do_imp and (i >= max_imp_samples):
-#             logger.debug("Switch to H0 at {0} of {1}.".format(i, n_reps))
-#             do_imp = False
-#             sim_param = p0
-
-#         if (hyp_type is None) or (hyp_type == "drug"):
-#             # DRR_FACTOR = .8
-#             amnesia, nonamnesia = data_funcs.simulate_reactions(
-#                 sim_param * drr, (1.0 - sim_param) * drr, n_periods
+#         stream_cutoffs = np.interp(
+#             1.0 - alpha_levels, stream_cdf, stream_record, left=left, right=np.NaN
+#         )
+#         if np.isnan(stream_cutoffs).any():
+#             print("RAW ", stream_weight[0])
+#             print(
+#                 "Stream min {0} stream max {1}".format(
+#                     stream_cdf.min(), stream_cdf.max()
+#                 )
 #             )
-#             llr = data_funcs.assemble_drug_llr((amnesia, nonamnesia), p0, p1)
-#             if imp_sample:
-#                 weight_out.append(
-#                     imp_sample_drug_weight((amnesia, nonamnesia), p0, sim_param)
+#             print(
+#                 "alpha min {0} alpha max {1}".format(
+#                     (1.0 - alpha_levels).min(), (1.0 - alpha_levels).max()
 #                 )
-
-#         elif hyp_type == "binom":
-#             amnesia = data_funcs.simulate_binom(
-#                 pd.Series(sim_param * np.ones(len(drr)), index=drr.index), n_periods
 #             )
-#             llr = data_funcs.assemble_binom_llr(amnesia, p0, p1)
-#             if imp_sample:
-#                 weight_out.append(imp_sample_binom_weight(amnesia, p0, sim_param))
-#         elif hyp_type == "pois":
-#             amnesia = data_funcs.simulate_pois(
-#                 pd.Series(sim_param * np.ones(len(drr)), index=drr.index), n_periods
-#             )
-#             llr = data_funcs.assemble_pois_llr(amnesia, p0, p1)
-#             if imp_sample:
-#                 weight_out.append(imp_sample_pois_weight(amnesia, p0, sim_param))
-#         elif hyp_type == "gaussian":
-#             amnesia = data_funcs.simulate_gaussian_noncum(
-#                 pd.Series(sim_param * np.ones(len(drr)), index=drr.index),
-#                 drr,
-#                 n_periods,
-#             )
-#             llr = data_funcs.assemble_gaussian_llr(amnesia, p0, p1)
-#             if imp_sample:
-#                 weight_out.append(
-#                     imp_sample_gaussian_weight(amnesia, p0, sim_param, drr)
-#                 )
-#         else:
-#             raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
+#             raise ValueError("NaN found in stream cutoffs.")
 
-#         if np.isnan(llr).any().any():
-#             raise ValueError("NaN in llr at iter {0}".format(i))
-#         if imp_sample and np.isnan(np.array(weight_out)).any().any():
-#             raise ValueError("NaN in weights at iter {0}".format(i))
-#         #            # Record the max value the each llr path reached
-#         out_rec.append(llr.max(0))
-#     out_rec = np.array(out_rec)
+#         stream_specific_cutoff_levels.append(stream_cutoffs)
+#     stream_specific_cutoff_levels = np.array(stream_specific_cutoff_levels).T
+#     return stream_specific_cutoff_levels
 
-#     if imp_sample:
-#         return out_rec, np.array(weight_out)
-
-#     else:
-#         return out_rec, np.ones_like(out_rec)
-
-
-# def finite_horizon_cutoff_simulation_wrapper(
-#     kwargs: Dict[str, Any]
-# ) -> Tuple[FloatArray, FloatArray]:
-#     """Simple wrapper for finite horizon MC reps for cutoff calculation that takes a single dict arg.
-
-#     Wraps finite_horizon_cutoff_simulation with all arguments wrapped into a
-#     single dictionary. Useful for parallelization.
-
-#     Args:
-#         kwargs (Dict[str, Any]): All the arguments to
-#             finite_horizon_cutoff_simulation in a dictionary. See that funcs
-#             docstring for details
-
-#     Returns:
-#         Tuple[FloatArray, FloatArray]: _description_
-#     """
-#     np.random.seed(kwargs["job_id"])
-#     try:
-#         return finite_horizon_cutoff_simulation(**kwargs)
-#     except:
-#         print(traceback.format_exc())
-#         return np.array([]), np.array([])
-
-
-ALPHA_SHIFT = 0.0
-
-
-def empirical_quant_presim_wrapper(kwargs):
-    stream_specific_cutoff_levels = []
-    record = kwargs["record"]
-    weights = kwargs["weights"]
-    alpha_levels = kwargs["alpha_levels"]
-    if "no_left_extrapolate" in kwargs:
-        left = np.NaN
-    else:
-        left = None
-
-    range_iter = range(record.shape[1])
-
-    if ("job_id" not in kwargs) or (kwargs["job_id"] == 0):
-        range_iter = tqdm(range_iter, desc="Per stream quantile estimation")
-
-    for stream_num in range_iter:
-        stream_record_raw = record[:, stream_num]
-        stream_weight_raw = weights[:, stream_num]
-        stream_idx = np.argsort(stream_record_raw)
-        stream_record = stream_record_raw[stream_idx]
-        stream_weight = stream_weight_raw[stream_idx] / stream_weight_raw.sum()
-        stream_cdf = stream_weight.cumsum() - ALPHA_SHIFT * stream_weight[0]
-
-        stream_cutoffs = np.interp(
-            1.0 - alpha_levels, stream_cdf, stream_record, left=left, right=np.NaN
-        )
-        if np.isnan(stream_cutoffs).any():
-            print("RAW ", stream_weight[0])
-            print(
-                "Stream min {0} stream max {1}".format(
-                    stream_cdf.min(), stream_cdf.max()
-                )
-            )
-            print(
-                "alpha min {0} alpha max {1}".format(
-                    (1.0 - alpha_levels).min(), (1.0 - alpha_levels).max()
-                )
-            )
-            raise ValueError("NaN found in stream cutoffs.")
-
-        stream_specific_cutoff_levels.append(stream_cutoffs)
-    stream_specific_cutoff_levels = np.array(stream_specific_cutoff_levels).T
-    return stream_specific_cutoff_levels
-
-
-# def finite_horizon_rejective_cutoffs(
-#     rate_data,
-#     p0,
-#     p1,
-#     alpha_levels,
-#     n_periods,
-#     k_reps,
-#     dbg=False,
-#     do_parallel=False,
-#     hyp_type="drug",
-#     sleep_time=5,
-#     normal_approx: bool = False,
-#     imp_sample: bool = True,
-#     imp_sample_prop=0.5,
-#     imp_sample_hedge=0.9,
-#     divide_cores=None,
-# ):
-#     """Calculate finite horizon rejective cutoffs from alpha levels using MC for drug sim.
-
-#     Number of simulations should exceed the inverse of the min diff of the
-#     alpha vector, otherwise you might end up with the same cutoff values for
-#     multiple levels.
-#     args:
-#         rate_data: vector of emission rates
-#         p0: null p
-#         p1: alt p
-#         alpha_levels: type 1 levels for which cutoffs should be calculated
-#         n_periods: finite horizon
-#         k_reps: number of MC sims for
-#     return:
-#         array of cutoff values which should be > 0
-
-#     """
-#     drr = pd.Series(rate_data)
-#     record = []
-#     print("Num hyps", len(drr))
-#     print("n per", n_periods)
-
-#     ten_pct = int(k_reps / 10.0)
-#     # Run simulation k_reps times
-#     # TODO: what is happening here?
-#     record_raw = finite_horizon_cutoff_simulation_wrapper(
-#         {
-#             "p0": p0,
-#             "p1": p1,
-#             "drr": drr,
-#             "n_periods": n_periods,
-#             "n_reps": k_reps,
-#             "job_id": 0,
-#             "hyp_type": hyp_type,
-#             "imp_sample": imp_sample,
-#             "imp_sample_prop": imp_sample_prop,
-#             "imp_sample_hedge": imp_sample_hedge,
-#         }
-#     )
-#     if imp_sample:
-#         record, weights = record_raw
-#     else:
-#         record = record_raw
-#     # Combine all path maximums into one array.
-#     # Shape is (# of reps, # of hyps)
-#     record = np.array(record)
-
-#     # Get the cutoffs for each individual stream, either exact or using a tdist
-#     if normal_approx:
-#         warnings.warn("Using normal approximation for quantile estimation.")
-
-#         #        fit_vals = [tdist.fit(record[:,ii]) for ii in tqdm(range(len(rate_data)), desc="t dist fits")]
-#         #        stream_specific_cutoff_levels = array([tdist(*t_dist_vals).ppf(1-alpha_levels) for t_dist_vals in tqdm(fit_vals, desc="t dist quantiles")])
-
-#         fit_vals = [
-#             stats.norm.fit(record[:, ii])
-#             for ii in tqdm(range(len(rate_data)), desc="t dist fits")
-#         ]
-#         stream_specific_cutoff_levels = np.array(
-#             [
-#                 stats.norm(*dist_vals).ppf(1 - alpha_levels)
-#                 for dist_vals in tqdm(fit_vals, desc="t dist quantiles")
-#             ]
-#         )
-#     if imp_sample:
-#         stream_specific_cutoff_levels = empirical_quant_presim_wrapper(
-#             {
-#                 "record": record,
-#                 "weights": weights,
-#                 "alpha_levels": alpha_levels,
-#                 "job_id": 0,
-#             }
-#         )
-
-#     else:
-#         stream_specific_cutoff_levels = empirical_quant_presim_wrapper(
-#             {
-#                 "record": record,
-#                 "weights": np.ones(record.shape),
-#                 "alpha_levels": alpha_levels,
-#                 "job_id": 0,
-#             }
-#         )
-#     #        stream_specific_cutoff_levels = percentile(record, 100 * (1 - alpha_levels), axis=0)
-
-#     # Take the max across streams for each cutoff.
-#     # Take A_j = max_i A_j^i, then
-#     # P(Lambda^i > A_j) < P(Lambda^i > A_j^i) < alpha_j
-#     cutoff_levels = stream_specific_cutoff_levels.max(1)
-
-#     #    from IPython.display import display
-#     #    display(cutoff_levels)
-
-#     if (cutoff_levels < 0).any():
-#         num_neg = (cutoff_levels < 0).sum()
-
-#         warnings.warn(
-#             "{0} Cutoff levels are negative: from {1} to {2}".format(
-#                 num_neg, cutoff_levels.min(), cutoff_levels.max()
-#             )
-#         )
-
-#     if dbg:
-#         return cutoff_levels, record
-#     else:
-#         return cutoff_levels
-
-
-# def infinite_horizon_MC_cutoffs(
-#     rate_data: pd.Series,
-#     p0: float,
-#     p1: float,
-#     alpha_levels: FloatArray,
-#     beta_levels: FloatArray,
-#     n_periods: int,
-#     k_reps: int,
-#     pair_iters: int = 10,
-#     hyp_type: Optional[str] = None,
-#     dbg: bool = False,
-# ) -> FloatArray:
-#     """Calculate finite horizon rejective cutoffs from alpha levels using MC for drug sims.
-
-#     Number of simulations should exceed the inverse of the min diff of the
-#     alpha vector, otherwise you might end up with the same cutoff values for
-#     multiple levels.
-#     Does not depend on step up or step down, as the condition for which the cutoffs
-#     are calculated depends only on the test statistic exceeding a threshold.
-
-#     args:
-#         rate_data: vector of emission rates
-#         p0: null p
-#         p1: alt p
-#         alpha_levels: type 1 levels for which cutoffs should be calculated
-#         n_periods: finite horizon
-#         k_reps: number of MC sims to run
-#     return:
-#         array of cutoff values which should be > 0
-
-#     """
-#     if dbg:
-#         raise NotImplementedError("For shame.")
-
-#     drr = pd.Series(rate_data)
-
-#     rej_max = 0.0
-#     acc_min = 0.0
-#     # Run simulation k_reps times
-#     for pair_num in trange(pair_iters, desc="Pairs of rej/acc"):
-#         rej_record = []
-#         for mc_it_number in trange(
-#             k_reps, desc="Rej MC cutoff simulations", leave=False
-#         ):
-#             # Simulate n_periods worth of data under the null with the provided
-#             # rates.
-#             if (hyp_type is None) or (hyp_type == "drug"):
-#                 (
-#                     sim_amnesia_reactions,
-#                     sim_nonamnesia_reactions,
-#                 ) = data_funcs.simulate_reactions(p0 * drr, (1.0 - p0) * drr, n_periods)
-
-#                 # Compute llr paths for data
-#                 llr = data_funcs.assemble_drug_llr(
-#                     (sim_amnesia_reactions, sim_nonamnesia_reactions), p0, p1
-#                 )
-#             elif hyp_type == "binom":
-#                 amnesia = data_funcs.simulate_binom(
-#                     pd.Series(p0 * np.ones(len(drr)), index=drr.index), n_periods
-#                 )
-#                 llr = data_funcs.assemble_binom_llr(amnesia, p0, p1)
-#             elif hyp_type == "pois":
-#                 amnesia = data_funcs.simulate_pois(
-#                     pd.Series(p0 * np.ones(len(drr)), index=drr.index), n_periods
-#                 )
-#                 llr = data_funcs.assemble_pois_llr(amnesia, p0, p1)
-#             elif hyp_type == "gaussian":
-#                 amnesia = data_funcs.simulate_gaussian_noncum(
-#                     pd.Series(p0 * np.ones(len(drr)), index=drr.index), drr, n_periods
-#                 )
-#                 llr = data_funcs.assemble_gaussian_llr(amnesia, p0, p1)
-#             else:
-#                 raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
-
-#             llr[llr < acc_min] = 0.0
-#             # Record the max value the each llr path reached
-#             rej_record.append(llr.max(0))
-
-#         # Get the cutoffs for each individual stream.
-#         rej_stream_specific_cutoff_levels = np.percentile(
-#             np.array(rej_record), 100 * (1 - alpha_levels), axis=0
-#         )
-#         # Take the max across streams for each cutoff.
-#         # Take A_j = max_i A_j^i, then
-#         # P(Lambda^i > A_j) < P(Lambda^i > A_j^i) < alpha_j
-#         rej_cutoff_levels = rej_stream_specific_cutoff_levels.max(1)
-#         rej_max = rej_cutoff_levels.max()
-
-#         acc_record = []
-#         for mc_it_number in tqdm(
-#             range(k_reps), desc="Acc MC cutoff simulations", leave=False
-#         ):
-#             # Simulate n_periods worth of data under the null with the provided
-#             # rates.
-#             if (hyp_type is None) or (hyp_type == "drug"):
-#                 (
-#                     sim_amnesia_reactions,
-#                     sim_nonamnesia_reactions,
-#                 ) = data_funcs.simulate_reactions(p1 * drr, (1.0 - p1) * drr, n_periods)
-
-#                 # Compute llr paths for data
-#                 llr = data_funcs.assemble_drug_llr(
-#                     (sim_amnesia_reactions, sim_nonamnesia_reactions), p0, p1
-#                 )
-#             elif hyp_type == "binom":
-#                 amnesia = data_funcs.simulate_binom(
-#                     pd.Series(p1 * np.ones(len(drr)), index=drr.index), n_periods
-#                 )
-#                 llr = data_funcs.assemble_binom_llr(amnesia, p0, p1)
-#             elif hyp_type == "pois":
-#                 amnesia = data_funcs.simulate_pois(
-#                     pd.Series(p1 * np.ones(len(drr)), index=drr.index), n_periods
-#                 )
-#                 llr = data_funcs.assemble_pois_llr(amnesia, p0, p1)
-#             elif hyp_type == "gaussian":
-#                 amnesia = data_funcs.simulate_gaussian_noncum(
-#                     pd.Series(p1 * np.ones(len(drr)), index=drr.index), drr, n_periods
-#                 )
-#                 llr = data_funcs.assemble_gaussian_llr(amnesia, p0, p1)
-#             else:
-#                 raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
-
-#             llr[llr > rej_max] = 0.0
-#             # Record the max value the each llr path reached
-#             acc_record.append(llr.min(0))
-
-#         # Get the cutoffs for each individual stream.
-#         acc_stream_specific_cutoff_levels = np.percentile(
-#             np.array(acc_record), 100 * beta_levels, axis=0
-#         )
-#         # Take the max across streams for each cutoff.
-#         # Take A_j = max_i A_j^i, then
-#         # P(Lambda^i > A_j) < P(Lambda^i > A_j^i) < alpha_j
-#         acc_cutoff_levels = acc_stream_specific_cutoff_levels.min(1)
-#         acc_max = acc_cutoff_levels.min()
-
-#     # if dbg:
-#     #     # This is very bad form.
-#     #     return cutoff_levels, record
-#     # else:
-
-#     return rej_cutoff_levels, acc_cutoff_levels
 
 
 def llr_term_moments(drr: pd.Series, p0: float, p1: float) -> pd.DataFrame:

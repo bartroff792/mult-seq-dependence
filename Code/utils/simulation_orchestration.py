@@ -450,28 +450,212 @@ def run_mc_synth_sim_tests(
 #         return [ex]
 
 
-def calc_sim_cutoffs(
+# def calc_sim_cutoffs(
+#     theta0:float,
+#     theta1:float,
+#     extra_params: Dict[str, Any],
+#     hyp_type: Literal["pois", "binom", "pois_grad"],
+#     m_total:int,
+#     alpha: float,
+#     beta: Optional[float]=None,
+#     error_control: Optional[Literal['fdr', 'pfdr']]='fdr',
+#     cut_type: Literal["BH", "BY", "BL", "HOLM"]="BL",
+#     stepup:bool=False,
+#     # m0_known:bool=False,
+#     m0: Optional[int]=None,
+#     n_periods=None,
+#     undershoot_prob=0.1,
+#     do_iterative_cutoff_MC_calc=False, # what is this?
+#     fin_par:bool=False,
+#     fh_sleep_time=6,
+#     fh_cutoff_imp_sample=False,
+#     fh_cutoff_imp_sample_prop=1.0,
+#     fh_cutoff_imp_sample_hedge=0.9,
+#     divide_cores=None,
+#     ) -> Tuple[pd.DataFrame, int]:
+#     """Get the LLR cutoffs for a set of generating paramters.
+    
+#     Args:
+
+#     Raises:
+#         Exception: _description_
+#         ValueError: _description_
+
+#     Returns:
+#         Tuple with 2 elements:
+#         - A pandas DataFrame with the cutoffs columns A and B (B only appears if infinite horizon)
+#             - might also have other stuff???
+#         - The number of periods to run the simulation for. will just be an echo of the input if that
+#             was provided. Otherwise 1000 for FH and data dependent for Infinite horizon.
+#     """ 
+#     if (cut_type == "BY") or (cut_type == "BL"):
+#         alpha_vec_raw = create_fdr_controlled_bl_alpha_indpt(alpha, m_total)
+#     elif cut_type == "BH":
+#         alpha_vec_raw = alpha * arange(1, 1 + m_total) / float(m_total)
+
+#     # Holm
+#     elif cut_type == "HOLM":
+#         alpha_vec_raw = alpha / (float(m_total) - arange(m_total))
+#     else:
+#         raise Exception("Not implemented yet")
+
+#     if error_control=="fdr":
+#         if stepup:
+#             raise NotImplementedError("Stepup not implemented for FDR control")
+#             scaled_alpha_vec = alpha_vec_raw / log(m_total)
+#         else:
+#             scaled_alpha_vec = cutoff_funcs.apply_fdr_control_to_alpha_vec(
+#                     alpha, alpha_vec_raw, m0=m0,
+#                 )
+#     elif error_control=="pfdr":
+#         if stepup:
+#             raise NotImplementedError("Stepup not implemented for FDR control")
+#             scaled_alpha_vec = alpha_vec_raw / log(m_total)
+#         else:
+#             raise NotImplementedError("pfdr not implemented yet")
+#             scaled_alpha_vec = cutoff_funcs.apply_fdr_control_to_alpha_vec(
+#                     alpha, alpha_vec_raw, m0=m0,
+#                 )
+#     elif error_control is None:
+#         print("Warning! Not scaling alpha for FDR control")
+#         scaled_alpha_vec = alpha_vec_raw
+#     else:
+#         raise ValueError(f"error_control must be 'fdr', 'pfdr', or None. Got {error_control}")
+
+#     params0, _ = data_funcs.construct_dgp(
+#             m_null=len(scaled_alpha_vec),
+#             m_alt=0,
+#             theta0=theta0,
+#             theta1=theta1,
+#             hyp_type=hyp_type,
+#             extra_params=extra_params,
+#             interleaved=False,
+#         )
+    
+#     params1, _ = data_funcs.construct_dgp(
+#             m_null=0,
+#             m_alt=len(scaled_alpha_vec),
+#             theta0=theta0,
+#             theta1=theta1,
+#             hyp_type=hyp_type,
+#             extra_params=extra_params,
+#             interleaved=False,
+#         )
+#     if beta is not None:  # Infinite horizon
+#         beta_vec_raw = beta * alpha_vec_raw / alpha
+#         if error_control=="fdr":
+#             if stepup:
+#                 raise NotImplementedError("Stepup not implemented for FDR control")
+#                 scaled_beta_vec = beta_vec_raw / log(m_total)
+#             else:
+#                 scaled_beta_vec = cutoff_funcs.apply_fdr_control_to_alpha_vec(
+#                         beta, beta_vec_raw, m0=m0,
+#                     )
+#         elif error_control=="pfdr":
+#             if stepup:
+#                 raise NotImplementedError("Stepup not implemented for FDR control")
+#                 scaled_beta_vec = beta_vec_raw / log(m_total)
+#             else:
+#                 raise NotImplementedError("pfdr not implemented yet")
+#                 scaled_beta_vec = cutoff_funcs.apply_fdr_control_to_alpha_vec(
+#                         beta, beta_vec_raw, m0=m0,
+#                     )
+#         elif error_control is None:
+#             print("Warning! Not scaling beta for FNR control")
+#             scaled_beta_vec = beta_vec_raw
+#         else:
+#             raise ValueError(f"error_control must be 'fdr', 'pfdr', or None. Got {error_control}")
+
+#         # Use Wald approximations to get from alpha and beta to A and B
+#         cutoff_df = cutoff_funcs.calculate_mult_sprt_cutoffs(
+#             scaled_alpha_vec, scaled_beta_vec
+#         )
+#         A_vec = cutoff_df["A"].values
+#         B_vec = cutoff_df["B"].values
+
+#         # In the infinite horizon case, estimate the number of periods
+#         # necessary to accept or reject all candidates with some probability.
+#         # First estimates expected number of periods for all hyps to terminate
+#         # then uses markovs inequality to get the number of periods to get the
+#         # desired bound.
+#         if n_periods is None:
+#             # Define \tilde{\tau}=\max_i \tau_i
+#             # By Markov we have P(\tilde{\tau} > n) <= E[\tilde{\tau}]/n
+#             # If we wish the LHS to be \leq \delta, we need
+#             # E[\tilde{\tau}] / n <= \delta
+#             # E[\tilde{\tau}] / \delta <= n
+#             n_periods = int(
+#                 cutoff_funcs.est_sample_size(
+#                     A_vec, B_vec, params0, params1, hyp_type=hyp_type
+#                 )
+#                 / undershoot_prob
+#             )
+
+#         if do_iterative_cutoff_MC_calc:
+#             raise NotImplementedError("Iterative cutoff MC calc not implemented. Too many bugs in this code")
+#             # min_alpha_diff = min(diff(scaled_alpha_vec))
+#             # min_beta_diff = min(diff(scaled_beta_vec))
+#             # k_reps = int(
+#             #     1.0 / float(undershoot_prob * min((min_alpha_diff, min_beta_diff)))
+#             # )
+#             # infinite_horizon_MC_cutoffs(
+#             #     drr,
+#             #     p0,
+#             #     p1,
+#             #     scaled_alpha_vec,
+#             #     scaled_beta_vec,
+#             #     n_periods,
+#             #     k_reps,
+#             #     pair_iters=3,
+#             #     hyp_type=hyp_type,
+#             # )
+
+#         logging.info("n_periods: {0}".format(n_periods))
+#     else:  # Rejective
+#         if n_periods is None:
+#             n_periods = 1000
+
+#         # Next calculate llr cutoffs
+#         min_alpha_diff = min(diff(scaled_alpha_vec))
+#         k_reps = int(1.0 / float(undershoot_prob * min_alpha_diff))
+
+#         #        raise ValueError("Alpha min {0} max {1}".format(scaled_alpha_vec.min(), scaled_alpha_vec.max()))
+#         A_vec = cutoff_funcs.estimate_finite_horizon_rejective_llr_cutoffs(
+#             params0=params0,
+#             params1=params1,
+#             hyp_type=hyp_type,
+#             n_periods=n_periods,
+#             alpha_levels=scaled_alpha_vec,
+#             k_reps=k_reps,
+#             imp_sample=fh_cutoff_imp_sample,
+#             imp_sample_prop=fh_cutoff_imp_sample_prop,
+#         )
+#         # TODO: this is a hack to avoid negative values in the cutoffs. Its hacky and it could cause problems if multiple values are <0. 
+#         # Instead estiamte the variance of the llr streams and use that to estimate the number of samples needed to ensure 
+#         # we don't get negatie values.
+#         EPS = 1e-4
+#         A_vec[A_vec<=0] = EPS
+
+#         # B_vec = None
+#         cutoff_df = pd.DataFrame({"A": A_vec,})
+
+#     return cutoff_df, n_periods
+
+
+# TODO: move calc_llr_cutoffs to cutoff_funcs
+def calc_llr_cutoffs(
     theta0:float,
     theta1:float,
     extra_params: Dict[str, Any],
     hyp_type: Literal["pois", "binom", "pois_grad"],
-    m_total:int,
-    alpha: float,
-    beta: Optional[float]=None,
-    scale_fdr: bool=True,
-    cut_type: Literal["BH", "BY", "BL", "HOLM"]="BL",
-    stepup:bool=False,
-    # m0_known:bool=False,
-    m0: Optional[int]=None,
+    alpha: np.ndarray,
+    beta: Optional[np.ndarray]=None,
     n_periods=None,
     undershoot_prob=0.1,
     do_iterative_cutoff_MC_calc=False, # what is this?
-    fin_par:bool=False,
-    fh_sleep_time=6,
     fh_cutoff_imp_sample=False,
     fh_cutoff_imp_sample_prop=1.0,
-    fh_cutoff_imp_sample_hedge=0.9,
-    divide_cores=None,
+    fh_cutoff_imp_sample_hedge: Optional[float]=None,
     ) -> Tuple[pd.DataFrame, int]:
     """Get the LLR cutoffs for a set of generating paramters.
     
@@ -488,31 +672,8 @@ def calc_sim_cutoffs(
         - The number of periods to run the simulation for. will just be an echo of the input if that
             was provided. Otherwise 1000 for FH and data dependent for Infinite horizon.
     """ 
-    if (cut_type == "BY") or (cut_type == "BL"):
-        alpha_vec_raw = create_fdr_controlled_bl_alpha_indpt(alpha, m_total)
-    elif cut_type == "BH":
-        alpha_vec_raw = alpha * arange(1, 1 + m_total) / float(m_total)
-
-    # Holm
-    elif cut_type == "HOLM":
-        alpha_vec_raw = alpha / (float(m_total) - arange(m_total))
-    else:
-        raise Exception("Not implemented yet")
-
-    if scale_fdr:
-        if stepup:
-            raise NotImplementedError("Stepup not implemented for FDR control")
-            scaled_alpha_vec = alpha_vec_raw / log(m_total)
-        else:
-            scaled_alpha_vec = cutoff_funcs.apply_fdr_control_to_alpha_vec(
-                    alpha, alpha_vec_raw, m0=m0,
-                )
-    else:
-        print("Warning! Not scaling alpha for FDR control")
-        scaled_alpha_vec = alpha_vec_raw
-
     params0, _ = data_funcs.construct_dgp(
-            m_null=len(scaled_alpha_vec),
+            m_null=len(alpha),
             m_alt=0,
             theta0=theta0,
             theta1=theta1,
@@ -523,7 +684,7 @@ def calc_sim_cutoffs(
     
     params1, _ = data_funcs.construct_dgp(
             m_null=0,
-            m_alt=len(scaled_alpha_vec),
+            m_alt=len(alpha),
             theta0=theta0,
             theta1=theta1,
             hyp_type=hyp_type,
@@ -531,22 +692,10 @@ def calc_sim_cutoffs(
             interleaved=False,
         )
     if beta is not None:  # Infinite horizon
-        beta_vec_raw = beta * alpha_vec_raw / alpha
-        if scale_fdr:
-            if stepup:
-                raise NotImplementedError("Stepup not implemented for FDR control")
-                scaled_beta_vec = beta_vec_raw / log(m_total)
-            else:
-                scaled_beta_vec = cutoff_funcs.apply_fdr_control_to_alpha_vec(
-                        beta, beta_vec_raw, m0=m0,
-                    )
-        else:
-            print("Warning! Not scaling beta for FNR control")
-            scaled_beta_vec = beta_vec_raw
-
+        
         # Use Wald approximations to get from alpha and beta to A and B
         cutoff_df = cutoff_funcs.calculate_mult_sprt_cutoffs(
-            scaled_alpha_vec, scaled_beta_vec
+            alpha, beta
         )
         A_vec = cutoff_df["A"].values
         B_vec = cutoff_df["B"].values
@@ -571,22 +720,7 @@ def calc_sim_cutoffs(
 
         if do_iterative_cutoff_MC_calc:
             raise NotImplementedError("Iterative cutoff MC calc not implemented. Too many bugs in this code")
-            # min_alpha_diff = min(diff(scaled_alpha_vec))
-            # min_beta_diff = min(diff(scaled_beta_vec))
-            # k_reps = int(
-            #     1.0 / float(undershoot_prob * min((min_alpha_diff, min_beta_diff)))
-            # )
-            # infinite_horizon_MC_cutoffs(
-            #     drr,
-            #     p0,
-            #     p1,
-            #     scaled_alpha_vec,
-            #     scaled_beta_vec,
-            #     n_periods,
-            #     k_reps,
-            #     pair_iters=3,
-            #     hyp_type=hyp_type,
-            # )
+           
 
         logging.info("n_periods: {0}".format(n_periods))
     else:  # Rejective
@@ -594,7 +728,7 @@ def calc_sim_cutoffs(
             n_periods = 1000
 
         # Next calculate llr cutoffs
-        min_alpha_diff = min(diff(scaled_alpha_vec))
+        min_alpha_diff = min(diff(alpha))
         k_reps = int(1.0 / float(undershoot_prob * min_alpha_diff))
 
         #        raise ValueError("Alpha min {0} max {1}".format(scaled_alpha_vec.min(), scaled_alpha_vec.max()))
@@ -603,16 +737,87 @@ def calc_sim_cutoffs(
             params1=params1,
             hyp_type=hyp_type,
             n_periods=n_periods,
-            alpha_levels=scaled_alpha_vec,
+            alpha_levels=alpha,
             k_reps=k_reps,
             imp_sample=fh_cutoff_imp_sample,
             imp_sample_prop=fh_cutoff_imp_sample_prop,
         )
+        # TODO: this is a hack to avoid negative values in the cutoffs. Its hacky and it could cause problems if multiple values are <0. 
+        # Instead estiamte the variance of the llr streams and use that to estimate the number of samples needed to ensure 
+        # we don't get negatie values.
+        EPS = 1e-4
+        A_vec[A_vec<=0] = EPS
 
         # B_vec = None
         cutoff_df = pd.DataFrame({"A": A_vec,})
 
     return cutoff_df, n_periods
+
+def construct_base_pvalue_cutoffs(cut_type: Literal["BH", "BY", "BL", "HOLM"], 
+                                  m_total:int, alpha: float) -> np.ndarray:
+    if (cut_type == "BY") or (cut_type == "BL"):
+        alpha_vec_raw = create_fdr_controlled_bl_alpha_indpt(alpha, m_total)
+    elif cut_type == "BH":
+        alpha_vec_raw = alpha * arange(1, 1 + m_total) / float(m_total)
+
+    # Holm
+    elif cut_type == "HOLM":
+        alpha_vec_raw = alpha / (float(m_total) - arange(m_total))
+    else:
+        raise Exception("Not implemented yet")
+    
+    return alpha_vec_raw
+
+
+def construct_sim_pvalue_cutoffs(
+    m_total:int,
+    alpha: float,
+    beta: Optional[float]=None,
+    error_control: Optional[Literal['fdr', 'pfdr']]='fdr',
+    cut_type: Literal["BH", "BY", "BL", "HOLM"]="BL",
+    stepup:bool=False,
+    m0: Optional[int]=None,
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    """Construct the pvalue cutoff vectors for a set of control levels and shapes.
+    
+    """ 
+    if stepup:
+        raise NotImplementedError("Stepup not implemented for FDR control")
+    if m0 is None:
+        m1 = None
+    else:
+        m1 = m_total - m0
+    alpha_vec = construct_base_pvalue_cutoffs(cut_type, m_total, alpha)
+    if beta is not None:  # Infinite horizon
+        beta_vec = construct_base_pvalue_cutoffs(cut_type, m_total, beta)
+    else:
+        beta_vec = None
+
+    if error_control=="fdr":
+
+        alpha_vec = cutoff_funcs.apply_fdr_control_to_alpha_vec(
+                    alpha, alpha_vec, m0=m0,
+                )
+        if beta is not None:
+            beta_vec = cutoff_funcs.apply_fdr_control_to_alpha_vec(
+                    beta, beta_vec, m0=m1,
+                )
+    elif error_control=="pfdr" and beta is None:
+        alpha_vec = cutoff_funcs.pfdr_finite_horizon_pvalue_cutoffs(
+            alpha_vec,
+            alpha,
+            m0=m0,
+        )
+    elif error_control=="pfdr" and beta is not None:
+        alpha_vec, beta_vec = cutoff_funcs.pfdr_pfnr_infinite_horizon_pvalue_cutoffs(
+            alpha_vec,
+            beta_vec,
+            pfdr=alpha,
+            pfnr=beta,
+            m0=m0,
+        )
+
+    return alpha_vec, beta_vec
 
 
 # def real_data_wrapper(
@@ -1021,7 +1226,7 @@ def mc_sim_and_analyze_synth_data(
     m_alt=None,
     sim_reps=100,
     m0_known=False,
-    scale_fdr=True,
+    error_control: Optional[Literal['pfdr', 'fdr']]='fdr',
     rho=-0.5,
     interleaved=False,
     undershoot_prob=0.2,
@@ -1059,8 +1264,8 @@ def mc_sim_and_analyze_synth_data(
         m0_known: (bool) if fdr-controlling scaling of the alpha cutoff vector
             is to be performed, indicates whether to assume number of true
             nulls is known.
-        scale_fdr: (bool) indicates whether or not to scale the alpha cutoffs
-            to control fdr under arbitrary joint distributions.
+        error_control (str): 'pfdr' or 'fdr' or None. If None, no error control 
+            adjustment beyond the standard BL alpha values is performed.
         rho: (float) correlation coefficient for correlated statistics
         interleaved: (bool) whether or not to interleave the true and false
             null hypotheses
@@ -1118,30 +1323,28 @@ def mc_sim_and_analyze_synth_data(
 
     # Calculate the LLR cutoffs and the number of simulation steps to run.
     # If n
-    # TODO: urgent... fix this.. need to pass extra_args etc
-    drr = None
-    cutoff_df, n_periods = calc_sim_cutoffs(
+    scaled_alpha, scaled_beta = construct_sim_pvalue_cutoffs(
+        m_total=m_total,
         alpha=alpha,
         beta=beta,
-        scale_fdr=scale_fdr,
+        error_control=error_control,
         cut_type=cut_type,
+        stepup=stepup,
+        m0=m_null,
+    )
+    cutoff_df, n_periods = calc_llr_cutoffs(
         theta0=theta0,
         theta1=theta1,
-        hyp_type=hyp_type,
         extra_params=extra_params,
-        stepup=stepup,
-        m0=m_null if m0_known else None,
-        m_total=m_total,
+        hyp_type=hyp_type,
+        alpha=scaled_alpha,
+        beta=scaled_beta,
         n_periods=n_periods,
         undershoot_prob=undershoot_prob,
-        
         do_iterative_cutoff_MC_calc=do_iterative_cutoff_MC_calc, # what is this?
-        fin_par=fin_par,
-        fh_sleep_time=fh_sleep_time,
         fh_cutoff_imp_sample=fh_cutoff_imp_sample,
         fh_cutoff_imp_sample_prop=fh_cutoff_imp_sample_prop,
         fh_cutoff_imp_sample_hedge=fh_cutoff_imp_sample_hedge,
-        divide_cores=divide_cores,
     )
     # TODO: add options for scaling style
 
