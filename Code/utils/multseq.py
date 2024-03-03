@@ -21,8 +21,7 @@ import pandas as pd
 import logging
 from dataclasses import dataclass
 
-from .data_funcs import df_generator
-from . import cutoff_funcs
+from . import cutoff_funcs, data_funcs
 
 logger = logging.getLogger()
 logger.setLevel(min((logging.WARNING, logger.level)))
@@ -190,7 +189,9 @@ def msprt(
     """
     if isinstance(statistics, pd.DataFrame):
         # Copy data to prevent deletion
-        statistics = df_generator(statistics.copy())
+        statistics = data_funcs.df_generator(statistics.copy())
+    else:
+        assert isinstance(statistics, data_funcs.PareableStatisticsStreamer), "statistics must be a dataframe or implement the PareableStatisticsStreamer interface"
 
     if (not rejective) and (cutoffs["B"]).isna().any():
         raise ValueError("No B acceptance vector passed for acceptive-rejective test")
@@ -199,16 +200,15 @@ def msprt(
         # TODO: raise a warning here
         pass
 
-    # statistics interface
-    # if not a dataframe must have the following atts
-    # statistics.columns must list hypothesis names of ACTIVE hypotheses
+    # statistics interface:
+    # statistics.get_columns() must list hypothesis names of ACTIVE hypotheses
     # statistics.iterrows() must return the generator object that emits (step_number, step_data_series)
     # statistics.drop(list_of_cols, **kwargs) must cause the ensuing yield statements
     #       to omit list_of_cols, and ignore kwargs
 
     # Calculate cutoffs
-    m_hyps = len(statistics.columns)
-    hyp_names = statistics.columns
+    hyp_names = statistics.get_columns()
+    m_hyps = len(hyp_names)
     llr_iter = statistics.iterrows()
 
     # Diagnostics
@@ -314,7 +314,7 @@ def msprt(
 
             data_ser.drop(reject_cols, inplace=True)
 
-        if len(statistics.columns) == 0:
+        if len(statistics.get_columns()) == 0:
             logging.debug("Stopping early on step " + str(step))
             #            print("end\n", data_ser, "\n", j_rejected, j_accepted)
             break
@@ -344,7 +344,7 @@ def msprt(
 
     fine_grained_outcomes = FineGrainedMSPRTOut(
         **{
-            "remaining": list(statistics.columns),
+            "remaining": list(statistics.get_columns()),
             "accepted": llr_accepted,
             "rejected": llr_rejected,
             #   'drugTerminationData':termination_level,

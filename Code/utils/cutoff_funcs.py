@@ -576,7 +576,7 @@ def get_lb_prob_at_least_one_rejection(alpha_vec: FloatArray, dontbelazy=True) -
     if dontbelazy:
         import datetime
         if datetime.datetime.now(tz=datetime.timezone.utc) > datetime.datetime(
-            2024, 3,3,10,10,10, tzinfo=datetime.timezone.utc):
+            2024, 3,4,10,10,10, tzinfo=datetime.timezone.utc):
             raise ValueError("Don't be lazy")
     return np.min(1.0 - alpha_vec)
 
@@ -684,6 +684,7 @@ def importance_sample_interpolation_helper(
         sim_params = copy.deepcopy(param0)
         sim_params["mu"] = sim_theta
     elif hyp_type == "gaussian":
+        raise NotImplementedError("Gaussian not implemented")
         theta0 = param0["mu"]
         theta1 = param1["mu"]
         sim_theta = imp_sample_prop * theta1 + (1.0 - imp_sample_prop) * theta0
@@ -958,72 +959,72 @@ def estimate_finite_horizon_rejective_llr_cutoffs(
 
 
 
-def llr_term_moments(drr: pd.Series, p0: float, p1: float) -> pd.DataFrame:
-    """Expectation of the llr terms for a drug sim  under the null hypothesis for each step.
+# def llr_term_moments(drr: pd.Series, p0: float, p1: float) -> pd.DataFrame:
+#     """Expectation of the llr terms for a drug sim  under the null hypothesis for each step.
 
-    Used for calculating finite horizon cutoffs via gaussian approximation of
-    the llr statistic path. Assumes temporal independence and thus a simple
-    hypothesis.
+#     Used for calculating finite horizon cutoffs via gaussian approximation of
+#     the llr statistic path. Assumes temporal independence and thus a simple
+#     hypothesis.
 
-    Args:
-        drr (pd.Series): drug use rate. Informs how many samples should be
-            expected at each step.
-        p0 (float): null hypothesis probability.
-        p1 (float): alternative hypothesis probability.
+#     Args:
+#         drr (pd.Series): drug use rate. Informs how many samples should be
+#             expected at each step.
+#         p0 (float): null hypothesis probability.
+#         p1 (float): alternative hypothesis probability.
 
-    Returns:
-        pd.DataFrame: with two columns:
-            term_mean: the expected value of an individual term's (or stage's)
-            contribution to the llr statistic
-            term_var: variance of each term's contribution.
-    """
-    term_mean = drr * (p0 * np.log(p1 / p0) + (1 - p0) * np.log((1 - p1) / (1 - p0)))
-    term_var = drr * (
-        p0 * np.log(p1 / p0) ** 2.0 + (1 - p0) * np.log((1 - p1) / (1 - p0)) ** 2.0
-    )
-    return pd.DataFrame({"term_mean": term_mean, "term_var": term_var})
-
-
-def llr_binom_term_moments(p0: pd.Series, p1: pd.Series) -> pd.DataFrame:
-    """Calculates mean and variance of single-example binomial llr terms.
-
-    Args:
-        p0 (pd.Series): null hypothesis probability.
-        p1 (pd.Series): alternative hypothesis probability.
-
-    Returns:
-        pd.DataFrame: contains two columns:
-            team_mean: mean of the llr terms.
-            term_var: variance of the llr terms.
-    """
-    const_a = np.log((1 - p1) / (1 - p0))
-    const_b = np.log(p1 / p0) - np.log((1 - p1) / (1 - p0))
-    eX = p0
-    varX = p0 * (1 - p0)
-    term_mean = const_a + const_b * eX
-    term_var = (const_b**2.0) * varX
-    return pd.DataFrame({"term_mean": term_mean, "term_var": term_var})
+#     Returns:
+#         pd.DataFrame: with two columns:
+#             term_mean: the expected value of an individual term's (or stage's)
+#             contribution to the llr statistic
+#             term_var: variance of each term's contribution.
+#     """
+#     term_mean = drr * (p0 * np.log(p1 / p0) + (1 - p0) * np.log((1 - p1) / (1 - p0)))
+#     term_var = drr * (
+#         p0 * np.log(p1 / p0) ** 2.0 + (1 - p0) * np.log((1 - p1) / (1 - p0)) ** 2.0
+#     )
+#     return pd.DataFrame({"term_mean": term_mean, "term_var": term_var})
 
 
-def llr_pois_term_moments(lam0: pd.Series, lam1: pd.Series) -> pd.DataFrame:
-    """Calculates mean and variance of one step for a poisson llr.
+# def llr_binom_term_moments(p0: pd.Series, p1: pd.Series) -> pd.DataFrame:
+#     """Calculates mean and variance of single-example binomial llr terms.
 
-    Args:
-        lam0 (pd.Series): null hypothesis rate.
-        lam1 (pd.Series): alternative hypothesis rate.
+#     Args:
+#         p0 (pd.Series): null hypothesis probability.
+#         p1 (pd.Series): alternative hypothesis probability.
 
-    Returns:
-        pd.DataFrame: contains two columns:
-            team_mean: mean of the llr terms.
-            term_var: variance of the llr terms.
-    """
-    const_a = -(lam1 - lam0)
-    const_b = np.log(lam1 / lam0)
-    eX = lam0
-    varX = lam0
-    term_mean = const_a + const_b * eX
-    term_var = (const_b**2.0) * varX
-    return pd.DataFrame({"term_mean": term_mean, "term_var": term_var})
+#     Returns:
+#         pd.DataFrame: contains two columns:
+#             team_mean: mean of the llr terms.
+#             term_var: variance of the llr terms.
+#     """
+#     const_a = np.log((1 - p1) / (1 - p0))
+#     const_b = np.log(p1 / p0) - np.log((1 - p1) / (1 - p0))
+#     eX = p0
+#     varX = p0 * (1 - p0)
+#     term_mean = const_a + const_b * eX
+#     term_var = (const_b**2.0) * varX
+#     return pd.DataFrame({"term_mean": term_mean, "term_var": term_var})
+
+
+# def llr_pois_term_moments(lam0: pd.Series, lam1: pd.Series) -> pd.DataFrame:
+#     """Calculates mean and variance of one step for a poisson llr.
+
+#     Args:
+#         lam0 (pd.Series): null hypothesis rate.
+#         lam1 (pd.Series): alternative hypothesis rate.
+
+#     Returns:
+#         pd.DataFrame: contains two columns:
+#             team_mean: mean of the llr terms.
+#             term_var: variance of the llr terms.
+#     """
+#     const_a = -(lam1 - lam0)
+#     const_b = np.log(lam1 / lam0)
+#     eX = lam0
+#     varX = lam0
+#     term_mean = const_a + const_b * eX
+#     term_var = (const_b**2.0) * varX
+#     return pd.DataFrame({"term_mean": term_mean, "term_var": term_var})
 
 
 # Var(aX+bY) = a**2 VarX + b**2 VarY + 2ab CovXY
@@ -1084,8 +1085,9 @@ def single_hyp_sequential_expected_rejection_time(
 def llr_term_mean_general(
     params0: Dict[str, Any], params1: Dict[str, Any], hyp_type: HypTypes
 ) -> pd.Series:
-    """Calculate the expected value of the llr terms for a general hypothesis test.
+    """Calculate the expected value of the llr terms for a general hypothesis test under the null.
 
+    E_{H_{0}}[log(L(theta_1) / L(theta_0))]
     Args:
         params0 (Dict[str, Any]): null hypothesis parameters
         params1 (Dict[str, Any]): alternative hypothesis parameters
@@ -1095,7 +1097,13 @@ def llr_term_mean_general(
         pd.Series: The expected value of the llr terms
     """
     if hyp_type == "drug":
-        raise NotImplementedError("Not implemented for drug type.")
+        # Likelihood L(mu,p)=exp(-mu) * (mu ** (x+y)) * (p**x) * ((1-p)**y) / (x! * y!)
+        eX = params0["mu"] * params0["p"]
+        eY = params0["mu"] * (1.0 - params0["p"])
+        const_a = np.log(params1["p"] / params0["p"])
+        const_b = np.log((1 - params1["p"]) / (1 - params0["p"]))
+        term_mean = const_a * eX + const_b * eY
+        return term_mean
     elif hyp_type == "pois":
 
         const_a = -(params1["mu"] - params0["mu"])

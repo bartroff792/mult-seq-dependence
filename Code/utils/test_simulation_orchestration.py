@@ -104,7 +104,48 @@ class TestSimCutoffs:
             assert len(beta_vec) == m_hyps
             assert (np.diff(beta_vec)>=0).all()
 
-
-    def test_llr_cuts(self):
-        simulation_orchestration.calc_llr_cutoffs
-        raise NotImplementedError()
+    @pytest.mark.parametrize(["beta","n_periods","error_control"], 
+                             [(None, 25, None), 
+                              (None, 25, "fdr"), 
+                              (0.2, None, "fdr"),
+                              (0.2, 25, "fdr"),
+                              (0.2, None, None),
+                              ])
+    def test_llr_cuts(self, beta, n_periods, error_control):
+        theta0 = 0.05
+        theta1 = 0.045
+        n = 10
+        m_hyps = 5
+        extra_params = {"n": n}
+        m_hyps = 5
+        alpha = 0.1
+        alpha_vec, beta_vec = simulation_orchestration.construct_sim_pvalue_cutoffs(
+            m_total=m_hyps,
+            alpha=alpha,
+            beta=beta,
+            error_control=error_control,
+            cut_type="BL",
+        )
+        np.random.seed(42)
+        cutoffs_df, n_periods = simulation_orchestration.calc_llr_cutoffs(
+            theta0=theta0,
+            theta1=theta1,
+            extra_params=extra_params,
+            hyp_type="binom",
+            alpha=alpha_vec,
+            beta=beta_vec,
+            n_periods=n_periods,
+        )
+        assert "A" in cutoffs_df.columns
+        assert "alpha" in cutoffs_df.columns
+        if beta is not None:
+            assert "B" in cutoffs_df.columns
+            assert "beta" in cutoffs_df.columns
+        else:
+            assert "B" not in cutoffs_df.columns
+            assert "beta" not in cutoffs_df.columns
+        # TODO: check these and add back in 
+        # assert (cutoffs_df["A"].diff()<=0).all()
+        # assert (cutoffs_df["alpha"].diff()>=0).all()
+        assert len(cutoffs_df) == m_hyps
+        assert n_periods > 10

@@ -6,6 +6,14 @@ import copy
 
 
 
+def build_simple_drug_params(m_hyps):
+    mu = pd.Series(np.linspace(3,5, m_hyps))
+    p0 = pd.Series(np.linspace(0.1, 0.5, m_hyps))
+    p1 = p0+0.1
+    params0 = {"mu":mu, "p":p0}
+    params1 = {"mu":mu, "p":p1}
+    return params0, params1
+
 class TestComputeLLR:
     def test_binom_stepwise(self):
         n = 10
@@ -18,7 +26,7 @@ class TestComputeLLR:
         params0["p"][:] = 0.1
         params1 = copy.deepcopy(params)
         params1["p"][:] = 0.3
-
+        np.random.seed(42)
         obs = data_funcs.simulate_correlated_observations(
             params=params,
             n_periods=50,
@@ -92,6 +100,19 @@ class TestConstructDGP:
         assert len(dgp["mu"]) == 10
         assert len(gt) == 10
 
+    def test_drug(self):
+        dgp, gt = data_funcs.construct_dgp(
+            m_null=5,
+            m_alt=5,
+            theta0=0.1,
+            theta1=0.2,
+            interleaved=False,
+            hyp_type="drug",
+            extra_params={"mu": 10},
+        )
+        assert len(dgp["p"]) == 10
+        assert len(gt) == 10
+
     def test_m_alt_null_and_interleaved(self):
         dgp, gt = data_funcs.construct_dgp(
             m_null=5,
@@ -159,30 +180,33 @@ class TestSimulateCorrelatedObservations:
             rho=0.5,
             hyp_type="pois",
         )
-        assert obs.shape == (100, 3), f"obs.shape={obs.shape} expected (100, 3)"
+        assert len(obs)==1
+        assert "obs" in obs
+        obs_df = obs["obs"]
+        assert obs_df.shape == (100, 3), f"obs_df.shape={obs_df.shape} expected (100, 3)"
         assert (
-            obs.index.name == "period"
-        ), f"obs.index.name={obs.index.name} expected 'period'"
+            obs_df.index.name == "period"
+        ), f"obs_df.index.name={obs_df.index.name} expected 'period'"
         assert (
-            obs.columns.name == "hyp_name"
-        ), f"obs.columns.name={obs.columns.name} expected 'hyp_name'"
+            obs_df.columns.name == "hyp_name"
+        ), f"obs_df.columns.name={obs_df.columns.name} expected 'hyp_name'"
         assert (
-            obs.index.dtype == np.int64
-        ), f"obs.index.dtype={obs.index.dtype} expected np.int64"
-        # assert obs.columns.dtype == np.object, f"obs.columns.dtype={obs.columns.dtype} expected np.object"
+            obs_df.index.dtype == np.int64
+        ), f"obs_df.index.dtype={obs_df.index.dtype} expected np.int64"
+        # assert obs_df.columns.dtype == np.object, f"obs_df.columns.dtype={obs_df.columns.dtype} expected np.object"
         assert (
-            obs.dtypes.iloc[0] == np.float64
-        ), f"obs.dtypes[0]={obs.dtypes[0]} expected np.float64"
+            obs_df.dtypes.iloc[0] == np.float64
+        ), f"obs_df.dtypes[0]={obs_df.dtypes[0]} expected np.float64"
         assert (
-            obs.dtypes.iloc[1] == np.float64
-        ), f"obs.dtypes[1]={obs.dtypes[1]} expected np.float64"
+            obs_df.dtypes.iloc[1] == np.float64
+        ), f"obs_df.dtypes[1]={obs_df.dtypes[1]} expected np.float64"
         assert (
-            obs.dtypes.iloc[2] == np.float64
-        ), f"obs.dtypes[2]={obs.dtypes[2]} expected np.float64"
-        assert obs.min().min() >= 0, f"obs.min().min()={obs.min().min()} expected >= 0"
+            obs_df.dtypes.iloc[2] == np.float64
+        ), f"obs_df.dtypes[2]={obs_df.dtypes[2]} expected np.float64"
+        assert obs_df.min().min() >= 0, f"obs_df.min().min()={obs_df.min().min()} expected >= 0"
         assert (
-            obs.max().max() <= 25
-        ), f"obs.max().max()={obs.max().max()} expected <= 10"
+            obs_df.max().max() <= 25
+        ), f"obs_df.max().max()={obs_df.max().max()} expected <= 10"
 
     def test_basic_functionality_binom(self):
 
@@ -197,16 +221,46 @@ class TestSimulateCorrelatedObservations:
             rho=0.5,
             hyp_type="binom",
         )
-        assert obs.shape == (100, 3)
-        assert obs.index.name == "period"
-        assert obs.columns.name == "hyp_name"
-        assert obs.index.dtype == np.int64
+        assert len(obs)==1
+        assert "obs" in obs
+        obs_df = obs["obs"]
+        assert obs_df.shape == (100, 3)
+        assert obs_df.index.name == "period"
+        assert obs_df.columns.name == "hyp_name"
+        assert obs_df.index.dtype == np.int64
         # assert obs.columns.dtype == np.object
-        assert obs.dtypes.iloc[0] == np.float64
-        assert obs.dtypes.iloc[1] == np.float64
-        assert obs.dtypes.iloc[2] == np.float64
-        assert obs.min().min() >= 0
-        assert obs.max().max() <= 10
+        assert obs_df.dtypes.iloc[0] == np.float64
+        assert obs_df.dtypes.iloc[1] == np.float64
+        assert obs_df.dtypes.iloc[2] == np.float64
+        assert obs_df.min().min() >= 0
+        assert obs_df.max().max() <= 10
+
+    def test_basic_functionality_drug(self):
+
+        hyp_idx = pd.Index(["a", "b", "c"], name="hyp_name")
+        params = {
+            "p": pd.Series([0.1, 0.2, 0.3], index=hyp_idx),
+            "mu": pd.Series([10, 10, 10], index=hyp_idx),
+        }
+        obs = data_funcs.simulate_correlated_observations(
+            params=params,
+            n_periods=100,
+            rho=0.5,
+            hyp_type="drug",
+        )
+        assert len(obs)==2
+        assert "relevant_events" in obs
+        assert "non_relevant_events" in obs
+        for kk, obs_df in obs.items():
+            assert obs_df.shape == (100, 3)
+            assert obs_df.index.name == "period"
+            assert obs_df.columns.name == "hyp_name"
+            assert obs_df.index.dtype == np.int64
+            # assert obs.columns.dtype == np.object
+            assert obs_df.dtypes.iloc[0] == np.float64
+            assert obs_df.dtypes.iloc[1] == np.float64
+            assert obs_df.dtypes.iloc[2] == np.float64
+            assert obs_df.min().min() >= 0
 
 
 class TestGeneralLLR:
@@ -258,3 +312,31 @@ class TestGeneralLLR:
         assert llr.index.name == "period"
         assert llr.columns.name == "hyp_name"
 
+
+    def test_drug(self):
+        mu = 10
+        hyp_idx = pd.Index(["a", "b", "c"], name="hyp_name")
+        params = {
+            "p": pd.Series([0.1, 0.2, 0.3], index=hyp_idx),
+            "mu": pd.Series(mu, index=hyp_idx),
+        }
+        params0 = copy.deepcopy(params)
+        params0["p"][:] = 0.1
+        params1 = copy.deepcopy(params)
+        params1["p"][:] = 0.3
+        llr, obs = data_funcs.generate_llr(
+            params=params,
+            n_periods=10,
+            rho=0.6,
+            hyp_type="drug",
+            params0=params0,
+            params1=params1,
+            rand_order=False,
+        )
+        assert llr.shape == (10, 3), f"llr.shape={llr.shape} expected (10, 3)"
+        assert (
+            llr.index.name == "period"
+        ), f"llr.index.name={llr.index.name} expected 'period'"
+        assert (
+            llr.columns.name == "hyp_name"
+        ), f"llr.columns.name={llr.columns.name} expected 'hyp_name'"
