@@ -238,7 +238,6 @@ def main(parameter_config, run_config):
         fh_sleep_time=60,
         do_iterative_cutoff_MC_calc=False,
         stepup=False,
-        fh_cutoff_normal_approx=False,
         fh_cutoff_imp_sample=True,
         fh_cutoff_imp_sample_prop=0.5,
         fh_cutoff_imp_sample_hedge=0.9,

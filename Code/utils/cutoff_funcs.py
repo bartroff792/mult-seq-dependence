@@ -80,6 +80,7 @@ Roadmap:
 
 
 """
+
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from scipy.special import logit, expit
 import numpy as np
@@ -97,6 +98,8 @@ import itertools
 import copy
 from scipy import stats
 
+from scipy.optimize import minimize as scipy_minimize
+
 
 # FDR controlled pvalue cutoffs and related functions
 FloatArray = NDArray[np.float32]
@@ -105,30 +108,37 @@ HypTypes = Literal["drug", "pois", "binom"]
 # Define a type of dataframe that contains columns `alpha`, `beta`, `A`, and `B`.
 # Some of those may be full of nulls, but all should be expeted to exist?
 CutoffDF = pd.DataFrame
-def build_cutoff_df(alpha: Optional[np.ndarray]=None,
-                    beta: Optional[np.ndarray]=None,
-                    A: Optional[np.ndarray]=None,
-                    B: Optional[np.ndarray]=None,
-                    ):
+
+
+def build_cutoff_df(
+    alpha: Optional[np.ndarray] = None,
+    beta: Optional[np.ndarray] = None,
+    A: Optional[np.ndarray] = None,
+    B: Optional[np.ndarray] = None,
+):
     if alpha is None and beta is None and A is None and B is None:
         raise ValueError("must pass at least one of alpha, beta, A, and B.")
     if alpha is not None:
-        assert np.all(alpha>0.0) and np.all(1.0>=alpha), "Alpha must be between (0,1]"
+        assert np.all(alpha > 0.0) and np.all(
+            1.0 >= alpha
+        ), "Alpha must be between (0,1]"
         assert np.all(np.diff(alpha) >= 0.0), "Alpha vector is not monotone increasing."
     if beta is not None:
-        assert np.all(beta>0.0) and np.all(1.0>=beta), "Beta must be between (0,1]"
+        assert np.all(beta > 0.0) and np.all(1.0 >= beta), "Beta must be between (0,1]"
         assert np.all(np.diff(beta) >= 0.0), "Beta vector is not monotone increasing."
     if A is not None:
-        assert np.all(A>0.0), "Rejection boundary As must be greater than 0."
-        assert np.all(np.diff(A) <= 0.0), "Rejection boundary As must be non-increasing."
+        assert np.all(A > 0.0), "Rejection boundary As must be greater than 0."
+        assert np.all(
+            np.diff(A) <= 0.0
+        ), "Rejection boundary As must be non-increasing."
     if B is not None:
-        assert np.all(B<0.0), "Acceptance boundary Bs must be less than 0."
-        assert np.all(np.diff(B) >= 0.0), "Acceptance boundary Bs must be non-decreasing."
+        assert np.all(B < 0.0), "Acceptance boundary Bs must be less than 0."
+        assert np.all(
+            np.diff(B) >= 0.0
+        ), "Acceptance boundary Bs must be non-decreasing."
 
-    return CutoffDF({"alpha":alpha,
-                     "beta":beta,
-                     "A":A,
-                     "B":B})
+    return CutoffDF({"alpha": alpha, "beta": beta, "A": A, "B": B})
+
 
 def guo_rao_stepdown_fdr_level(
     alpha_vec: FloatArray,
@@ -193,7 +203,11 @@ def guo_rao_stepdown_fdr_level(
     return m0 * (term1 + term2)
 
 
-def get_guo_rao_scaling_factor(fdr_level: float, alpha_vec: np.ndarray, m0: Optional[int]=None) -> float:
+def get_guo_rao_scaling_factor(
+    fdr_level: float,
+    alpha_vec: np.ndarray,
+    m0: Optional[int] = None,
+) -> float:
     """Returns a constanst lambda such that using cutoffs (alpha_i*lambda, ... ) control fdr at fdr_level
 
     Args:
@@ -204,10 +218,20 @@ def get_guo_rao_scaling_factor(fdr_level: float, alpha_vec: np.ndarray, m0: Opti
         A scaling factor which, when multiplied by alpha_vec, will return a
         proportional cutoff vector that controls alpha at the correct level.
     """
+    assert 0.0 < fdr_level <= 1.0, "FDR level must be between 0 and 1."
+    assert np.all(
+        0.0 < alpha_vec
+    ), "Alpha vector contains values less than or equal to 0."
+    if m0 is not None:
+        assert m0 >= 0, "Number of true null hypotheses must be non-negative."
     return fdr_level / guo_rao_stepdown_fdr_level(alpha_vec, m0=m0)
 
 
-def apply_fdr_controlled_alpha(fdr_level: float, alpha_vec: FloatArray, m0: Optional[int]=None) -> FloatArray:
+def apply_fdr_control_to_alpha_vec(
+    fdr_level: float,
+    alpha_vec: FloatArray,
+    m0: Optional[int] = None,
+) -> FloatArray:
     """Scales an alpha vector such that it controls FDR for a stepdown procedure.
 
     Does not require independence.
@@ -220,6 +244,12 @@ def apply_fdr_controlled_alpha(fdr_level: float, alpha_vec: FloatArray, m0: Opti
     Returns:
         A vector of alpha cutoffs that control FDR at fdr_level for stepdown procedures.
     """
+    assert 0.0 < fdr_level <= 1.0, "FDR level must be between 0 and 1."
+    assert np.all(
+        0.0 < alpha_vec
+    ), "Alpha vector contains values less than or equal to 0."
+    if m0 is not None:
+        assert m0 >= 0, "Number of true null hypotheses must be non-negative."
     return get_guo_rao_scaling_factor(fdr_level, alpha_vec, m0=m0) * alpha_vec
 
 
@@ -240,6 +270,8 @@ def create_fdr_controlled_bh_alpha_indpt(fdr_level: float, m_hyps: int) -> Float
     Returns:
         A vector of alpha cutoffs that control FDR at fdr_level.
     """
+    assert 0.0 < fdr_level <= 1.0, "FDR level must be between 0 and 1."
+    assert m_hyps >= 1, "Number of hypotheses must be positive."
     return fdr_level * np.arange(1, m_hyps + 1, dtype=float) / float(m_hyps)
 
 
@@ -256,7 +288,7 @@ def create_fdr_controlled_bh_alpha(fdr_level: float, m_hyps: int) -> FloatArray:
         A vector of alpha cutoffs that control FDR at fdr_level for stepdown procedures.
     """
     alpha_vec_raw = create_fdr_controlled_bh_alpha_indpt(fdr_level, m_hyps)
-    return apply_fdr_controlled_alpha(fdr_level, alpha_vec_raw)
+    return apply_fdr_control_to_alpha_vec(fdr_level, alpha_vec_raw)
 
 
 def create_fdr_controlled_bl_alpha_indpt(
@@ -322,7 +354,7 @@ def create_fdr_controlled_bl_alpha(
         indpt_fdr_level = fdr_level
     alpha_vec_raw = create_fdr_controlled_bl_alpha_indpt(indpt_fdr_level, m_hyps)
     # print(delvec)
-    return apply_fdr_controlled_alpha(fdr_level, alpha_vec_raw)
+    return apply_fdr_control_to_alpha_vec(fdr_level, alpha_vec_raw)
 
 
 def calc_bh_alpha_and_cuts(
@@ -440,7 +472,7 @@ def calculate_mult_sprt_cutoffs(
 
 
 # TODO: fix this. calculating for reversed statistics
-def get_pvalue_cutoffs(A_vec:np.ndarray, B_vec:np.ndarray, rho=0.583) -> CutoffDF:
+def get_pvalue_cutoffs(A_vec: np.ndarray, B_vec: np.ndarray, rho=0.583) -> CutoffDF:
     """Inverts Wald approx to get type 1/2 error cutoffs from llr cutoffs."""
     alpha_vec = np.zeros(A_vec.shape)
     beta_vec = np.zeros(B_vec.shape)
@@ -460,8 +492,7 @@ def get_pvalue_cutoffs(A_vec:np.ndarray, B_vec:np.ndarray, rho=0.583) -> CutoffD
     return build_cutoff_df(alpha=alpha_vec, beta=beta_vec, A=A_vec, B=B_vec)
 
 
-# TODO: fix this. calculating for reversed statistics
-def pfdr_pfnr_cutoffs(
+def pfdr_pfnr_infinite_horizon_pvalue_cutoffs(
     alpha_raw_vec: FloatArray,
     beta_raw_vec: FloatArray,
     pfdr: float,
@@ -473,7 +504,7 @@ def pfdr_pfnr_cutoffs(
 
     Uses an interative scheme to find pvalue cutoffs that satisfy the pfdr and
     pfnr levels that utilize the same vector structure as the raw inputs.
-    See the section of the readme titled "THM: pFDR and pFNR Control for In􏰅nite Horizon"
+    See the section of the readme titled "THM: pFDR and pFNR Control for Infinite Horizon"
 
     Args:
         alpha_raw_vec (np.ndarray): raw vector of rejective p-value cutoffs.
@@ -494,10 +525,14 @@ def pfdr_pfnr_cutoffs(
     if m0 is None:
         m1 = None
     else:
+        assert (m0 > 0) and (
+            m0 < m
+        ), "Number of true nulls must be in (0, m) for joint pFDR and pFNR control."
         m1 = m - m0
     # Raw alpha and beta vectors
     alpha_vec0 = alpha_raw_vec
     beta_vec0 = beta_raw_vec
+    pvalue_cutoff_verifier(alpha_vec0, beta_vec0)
     # Get pFDR and pFNR control levels using current alpha and beta vectors
     # by first calculating FDR and FNR levels (via Guo+Rao) then scaling those
     # by the (approximate) probability of at least one rejection (or acceptance)
@@ -525,19 +560,102 @@ def pfdr_pfnr_cutoffs(
                 np.log10(max(abs(beta_vec1 - beta_vec0))),
             )
         )
+    # Confirm that nothing has gone wrong.
+    pvalue_cutoff_verifier(alpha_vec1, beta_vec1)
     return alpha_vec1, beta_vec1
 
+def get_lb_prob_at_least_one_rejection(alpha_vec: FloatArray, dontbelazy=True) -> float:
+    """Get lower bound for the probability of at least one rejection.
 
-# NEw version
+    Args:
+        alpha_vec (np.ndarray): increasing vector of p-value cutoffs.
+
+    Returns:
+        float: lower bound for the probability of at least one rejection.
+    """
+    if dontbelazy:
+        import datetime
+        if datetime.datetime.now(tz=datetime.timezone.utc) > datetime.datetime(
+            2024, 3,3,10,10,10, tzinfo=datetime.timezone.utc):
+            raise ValueError("Don't be lazy")
+    return np.min(1.0 - alpha_vec)
+
+def pfdr_finite_horizon_pvalue_cutoffs(
+    alpha_raw_vec: FloatArray,
+    pfdr: float,
+    m0: Optional[int] = None,
+    epsilon: float = 10.0**-8,
+    max_iters: int = 25,
+) -> FloatArray:
+    """pFDR controlled pvalue cutoffs for finite horizon rejective sequential stepdown.
+
+    Uses an interative scheme to find pvalue cutoffs that satisfy the pfdr
+    levels that utilize the same vector structure as the raw inputs.
+    
+
+    Args:
+        alpha_raw_vec (np.ndarray): raw vector of rejective p-value cutoffs.
+            only the structure will be used, as a linear scaling will be applied.
+        pfdr (float): desired pFDR control level
+        m0 (Optional[int]): number of true nulls, if known
+        epsilon (float, optional): tolerance for convergence. Defaults to 10.0**-8.
+
+    Returns:
+        np.ndarray: final alpha vector.
+    """
+    # Total number of hypotheses
+    m = len(alpha_raw_vec)
+    # number of false hypotheses
+    if m0 is None:
+        m1 = None
+    else:
+        assert (m0 > 0) and (
+            m0 < m
+        ), "Number of true nulls must be in (0, m) for joint pFDR and pFNR control."
+        m1 = m - m0
+    # Raw alpha and beta vectors
+    alpha_vec0 = alpha_raw_vec
+    pvalue_cutoff_verifier(alpha_vec0)
+    lb_prob_at_least_one_rejection = get_lb_prob_at_least_one_rejection(alpha_vec0)
+    # Get pFDR control levels using current alpha vector by first 
+    # calculating FDR (via Guo+Rao) then scaling those by an approximate 
+    # lower bound for the probability of at least one rejection)
+    pfdrx = guo_rao_stepdown_fdr_level(alpha_vec0, m0) / lb_prob_at_least_one_rejection
+    
+    # Now scale the vectors to ensure control
+    alpha_vec1 = pfdr * alpha_vec0 / pfdrx
+    # However this adjusts the denominators of the scaling factors pfdrx and
+    # pfnrx, meaning the bound may not hold. Repeat this procedure until
+    # convergence.
+    ii = 0
+    while (
+        max(abs(alpha_vec1 - alpha_vec0)) > epsilon
+    ):
+        alpha_vec0 = copy.copy(alpha_vec1)
+        lb_prob_at_least_one_rejection = get_lb_prob_at_least_one_rejection(alpha_vec0)
+        pfdrx = guo_rao_stepdown_fdr_level(alpha_vec0, m0) / lb_prob_at_least_one_rejection
+        
+        alpha_vec1 = pfdr * alpha_vec0 / pfdrx
+        logging.debug(
+            "Rej alpha log range: {0}".format(
+                np.log10(max(abs(alpha_vec1 - alpha_vec0)))
+            )
+        )
+        if ii > max_iters:
+            raise ValueError("Failed to converge in {0} iterations.".format(max_iters))
+        ii += 1
+    # Confirm that nothing has gone wrong.
+    pvalue_cutoff_verifier(alpha_vec1)
+    return alpha_vec1
 
 def importance_sample_interpolation_helper(
-        param0: Dict[str, Any],
-        param1: Dict[str, Any],
-        imp_sample_prop: float,
-        hyp_type: HypTypes,
+    param0: Dict[str, Any],
+    param1: Dict[str, Any],
+    imp_sample_prop: float,
+    hyp_type: HypTypes,
 ) -> float:
-    """ Calculate the simulation parameter for importance sampling.
-    
+    """Calculate the simulation parameter for importance sampling.
+
     Args:
         theta0: null param
         theta1: alt param
@@ -547,7 +665,7 @@ def importance_sample_interpolation_helper(
 
     Returns:
         The simulation parameter for importance sampling.
-        """
+    """
     if hyp_type == "drug" or hyp_type == "binom":
         theta0 = param0["p"]
         theta1 = param1["p"]
@@ -575,7 +693,8 @@ def importance_sample_interpolation_helper(
         raise Exception("Unrecognized hyp type ", hyp_type)
     return sim_params
 
-def finite_horizon_cutoff_simulation_general(
+
+def finite_horizon_cutoff_simulation(
     params0: Dict[str, Any],
     params1: Dict[str, Any],
     hyp_type: HypTypes,
@@ -583,24 +702,20 @@ def finite_horizon_cutoff_simulation_general(
     n_reps: int = 1000,
     imp_sample: bool = True,
     imp_sample_prop: float = 0.2,
-    # imp_sample_hedge: float = 0.9,
+    imp_sample_hedge: Optional[float] = None,
 ) -> Tuple[FloatArray, FloatArray]:
     """Generate finite horizon sample path maxs (and weights) for MC cutoff estimation.
 
     Allows use of importance sampling to reduce variance of simulation.
 
     Args:
-        p0: null param
-        p1: alt param
-        drr: drug response rate (ie overall rate of side effect reports)
+        params0: null param
+        params1: alt param
+        hyp_type: drug, binom, etc
         n_periods: horizon
         n_reps: number of MC reps
-        job_id: Used for parralelization and reporting
-        hyp_type: drug, binom, etc
         imp_sample: boolean, use importance sampling
         imp_sample_prop: p=p1 * q + p0 * (1-q)  as simulation dist param
-        imp_sample_hedge: proportion of samples to draw from importance
-            sampling, vs true null
 
     Returns:
         maxs: array of max llr for each MC rep
@@ -608,7 +723,8 @@ def finite_horizon_cutoff_simulation_general(
             When importance sampling is employed,
 
     """
-
+    if imp_sample_hedge is not None:
+        raise NotImplementedError("imp_sample_hedge is not yet implemented.")
     out_rec = []
 
     weight_out = []
@@ -633,7 +749,7 @@ def finite_horizon_cutoff_simulation_general(
         #     do_imp = False
         #     sim_param = p0
 
-        llr_paths, obs_data = data_funcs.generate_llr_general(
+        llr_paths, obs_data = data_funcs.generate_llr(
             params=sim_params,
             n_periods=n_periods,
             rho=1e-8,
@@ -643,12 +759,17 @@ def finite_horizon_cutoff_simulation_general(
             rand_order=False,
             # extra_params=extra_params,
         )
-        log_stepwise_imp_weight = data_funcs.compute_llr(observed_data=obs_data, hyp_type=hyp_type, params0=sim_params, params1=params0, cumulative=False,)
+        log_stepwise_imp_weight = data_funcs.compute_llr(
+            observed_data=obs_data,
+            hyp_type=hyp_type,
+            params0=sim_params,
+            params1=params0,
+            cumulative=False,
+        )
         log_imp_weight = log_stepwise_imp_weight.sum(0)
         imp_weight = np.exp(log_imp_weight)
 
         weight_out.append(imp_weight)
-
 
         if np.isnan(llr_paths).any().any():
             raise ValueError("NaN in llr at iter {0}".format(ii))
@@ -662,7 +783,77 @@ def finite_horizon_cutoff_simulation_general(
     return out_rec, weight_out
 
 
-def finite_horizon_rejective_cutoffs_general(
+def gumbel_r_param_fit(samples: np.ndarray, weights: np.ndarray) -> Tuple[float, float]:
+    """Get the location and scale fit for a Gumbel R distribution using weighted samples.
+
+    Args:
+        samples: array of samples
+        weights: array of weights for each sample.
+
+    Returns:
+        Tuple of location and scale parameters for the Gumbel R distribution."""
+
+    # Define the weighted log-likelihood function for the Gumbel distribution
+    def weighted_log_likelihood(params: Tuple[float, float]) -> Tuple[float, float]:
+        mu, log_beta = params
+        beta = np.exp(log_beta)
+        # Compute the log-likelihood of each sample
+        log_likelihoods = (
+            -(samples - mu) / beta - np.exp(-(samples - mu) / beta) - np.log(beta)
+        )
+        # Apply weights
+        weighted_log_likelihoods = weights * log_likelihoods
+        # Return the negative sum of weighted log-likelihoods (since we're minimizing)
+        return -np.sum(weighted_log_likelihoods)
+
+    # Initial parameter guesses
+    initial_params = [np.mean(samples), np.log(np.std(samples))]
+
+    # Minimize the negative weighted log-likelihood
+    result = scipy_minimize(weighted_log_likelihood, initial_params)
+
+    # Extract the estimated parameters
+    mu_est, log_beta_est = result.x
+    beta_est = np.exp(log_beta_est)
+    return mu_est, beta_est
+
+
+def gumbel_r_fit_dist(samples: np.ndarray, weights: np.ndarray) -> stats.gumbel_r:
+    """Fit a Gumbel R distribution to weighted samples.
+
+    Args:
+        samples: array of samples
+        weights: array of weights for each sample.
+
+    Returns:
+        A Gumbel R distribution fitted to the weighted samples."""
+    mu_est, beta_est = gumbel_r_param_fit(samples, weights)
+    return stats.gumbel_r(loc=mu_est, scale=beta_est)
+
+def get_tail_values(dists: List[stats.rv_continuous], quantiles: FloatArray) -> FloatArray:
+    """Get the tail values  a list of distributions at specified quantiles.
+
+    Args:
+        dists: list of distributions
+        quantiles: quantiles at which to evaluate the tails
+
+    Returns:
+        Square array with rows corresponding to data streams/hypotheses and columns to cutoffs."""
+    return np.array([dist.ppf(1 - quantiles) for dist in dists])
+
+def get_max_tail_values(dists: List[stats.rv_continuous], quantiles: FloatArray) -> FloatArray:
+    """Get the max tail values for a list of distributions at specified quantiles.
+
+    Args:
+        dists: list of distributions
+        quantiles: quantiles at which to evaluate the tails
+
+    Returns:
+        Array of max tail values for each quantile."""
+    return get_tail_values(dists, quantiles).max(0)
+
+
+def estimate_finite_horizon_rejective_llr_cutoffs(
     params0: Dict[str, Any],
     params1: Dict[str, Any],
     alpha_levels: FloatArray,
@@ -670,16 +861,17 @@ def finite_horizon_rejective_cutoffs_general(
     k_reps: int,
     hyp_type: HypTypes,
     # sleep_time=5,
-    normal_approx: bool = False,
     imp_sample: bool = True,
-    imp_sample_prop=0.5,
-    # imp_sample_hedge=0.9,
+    imp_sample_prop: float = 0.5,
+    imp_sample_hedge: Optional[float] = None,
     # divide_cores=None,
 ):
     """Calculate finite horizon rejective cutoffs from alpha levels using MC."""
-    # Run simulation k_reps times
-    # TODO: what is happening here?
-    record, weights = finite_horizon_cutoff_simulation_general(
+    # Get the max LLR value accross each stream with a weight for each
+    # sample via importance sampling by generating from parameters in between
+    # the null and alternative.
+    # k_reps is the number of samples to draw
+    record, weights = finite_horizon_cutoff_simulation(
         params0,
         params1,
         hyp_type,
@@ -689,38 +881,13 @@ def finite_horizon_rejective_cutoffs_general(
         imp_sample_prop=imp_sample_prop,
         # imp_sample_hedge=imp_sample_hedge,
     )
-    assert record.shape==weights.shape, f"record shape {record.shape} does not match weights shape {weights.shape}."
+    assert (
+        record.shape == weights.shape
+    ), f"record shape {record.shape} does not match weights shape {weights.shape}."
     m_hyps = record.shape[-1]
     # Get the cutoffs for each individual stream, either exact or using a tdist
-    if normal_approx:
-        warnings.warn("Using normal approximation for quantile estimation.")
-
-        #        fit_vals = [tdist.fit(record[:,ii]) for ii in tqdm(range(len(rate_data)), desc="t dist fits")]
-        #        stream_specific_cutoff_levels = array([tdist(*t_dist_vals).ppf(1-alpha_levels) for t_dist_vals in tqdm(fit_vals, desc="t dist quantiles")])
-
-        fit_vals = [
-            stats.norm.fit(record[:, ii])
-            for ii in tqdm(range(m_hyps), desc="t dist fits")
-        ]
-        stream_specific_cutoff_levels = np.array(
-            [
-                stats.norm(*dist_vals).ppf(1 - alpha_levels)
-                for dist_vals in tqdm(fit_vals, desc="t dist quantiles")
-            ]
-        )
-    stream_specific_cutoff_levels = empirical_quant_presim_wrapper(
-        {
-            "record": record,
-            "weights": weights,
-            "alpha_levels": alpha_levels,
-            "job_id": 0,
-        }
-    )
-
-    # Take the max across streams for each cutoff.
-    # Take A_j = max_i A_j^i, then
-    # P(Lambda^i > A_j) < P(Lambda^i > A_j^i) < alpha_j
-    cutoff_levels = stream_specific_cutoff_levels.max(1)
+    fit_dists = [gumbel_r_fit_dist(record[:, ii], weights[:, ii]) for ii in range(m_hyps)]
+    cutoff_levels = get_max_tail_values(fit_dists, alpha_levels)
 
     #    from IPython.display import display
     #    display(cutoff_levels)
@@ -733,169 +900,170 @@ def finite_horizon_rejective_cutoffs_general(
                 num_neg, cutoff_levels.min(), cutoff_levels.max()
             )
         )
+    llr_cutoff_verifier(cutoff_levels)
 
     return cutoff_levels
 
 
-def finite_horizon_cutoff_simulation(
-    p0: float,
-    p1: float,
-    drr: Optional[float] = None,
-    n_periods: int = 100,
-    n_reps: int = 1000,
-    job_id: int = 0,
-    hyp_type: str = "drug",
-    imp_sample: bool = True,
-    imp_sample_prop: float = 0.2,
-    imp_sample_hedge: float = 0.9,
-) -> Tuple[FloatArray, FloatArray]:
-    """Generate finite horizon sample path maxs (and weights) for MC cutoff estimation.
+# def finite_horizon_cutoff_simulation(
+#     p0: float,
+#     p1: float,
+#     drr: Optional[float] = None,
+#     n_periods: int = 100,
+#     n_reps: int = 1000,
+#     job_id: int = 0,
+#     hyp_type: str = "drug",
+#     imp_sample: bool = True,
+#     imp_sample_prop: float = 0.2,
+#     imp_sample_hedge: float = 0.9,
+# ) -> Tuple[FloatArray, FloatArray]:
+#     """Generate finite horizon sample path maxs (and weights) for MC cutoff estimation.
 
-    Allows use of importance sampling to reduce variance of simulation.
+#     Allows use of importance sampling to reduce variance of simulation.
 
-    Args:
-        p0: null param
-        p1: alt param
-        drr: drug response rate (ie overall rate of side effect reports)
-        n_periods: horizon
-        n_reps: number of MC reps
-        job_id: Used for parralelization and reporting
-        hyp_type: drug, binom, etc
-        imp_sample: boolean, use importance sampling
-        imp_sample_prop: p=p1 * q + p0 * (1-q)  as simulation dist param
-        imp_sample_hedge: proportion of samples to draw from importance
-            sampling, vs true null
+#     Args:
+#         p0: null param
+#         p1: alt param
+#         drr: drug response rate (ie overall rate of side effect reports)
+#         n_periods: horizon
+#         n_reps: number of MC reps
+#         job_id: Used for parralelization and reporting
+#         hyp_type: drug, binom, etc
+#         imp_sample: boolean, use importance sampling
+#         imp_sample_prop: p=p1 * q + p0 * (1-q)  as simulation dist param
+#         imp_sample_hedge: proportion of samples to draw from importance
+#             sampling, vs true null
 
-    Returns:
-        maxs: array of max llr for each MC rep
-        weights: array of weights for each MC rep. For a non-importance sampled run, these should be even.
-            When importance sampling is employed,
+#     Returns:
+#         maxs: array of max llr for each MC rep
+#         weights: array of weights for each MC rep. For a non-importance sampled run, these should be even.
+#             When importance sampling is employed,
 
-    """
+#     """
 
-    out_rec = []
+#     out_rec = []
 
-    # If importance sampling is requested, calculate the simulation parameter
-    # based on the model type, the hypotheses, and the interpolation parameter.
-    if imp_sample:
-        if hyp_type == "drug" or hyp_type == "binom":
-            sim_param = expit(
-                imp_sample_prop * logit(p1) + (1.0 - imp_sample_prop) * logit(p0)
-            )
-        elif hyp_type == "pois":
-            sim_param = np.exp(
-                imp_sample_prop * np.log(p1) + (1.0 - imp_sample_prop) * np.log(p0)
-            )
-        elif hyp_type == "gaussian":
-            sim_param = imp_sample_prop * p1 + (1.0 - imp_sample_prop) * p0
-        else:
-            raise Exception("Unrecognized hyp type ", hyp_type)
+#     # If importance sampling is requested, calculate the simulation parameter
+#     # based on the model type, the hypotheses, and the interpolation parameter.
+#     if imp_sample:
+#         if hyp_type == "drug" or hyp_type == "binom":
+#             sim_param = expit(
+#                 imp_sample_prop * logit(p1) + (1.0 - imp_sample_prop) * logit(p0)
+#             )
+#         elif hyp_type == "pois":
+#             sim_param = np.exp(
+#                 imp_sample_prop * np.log(p1) + (1.0 - imp_sample_prop) * np.log(p0)
+#             )
+#         elif hyp_type == "gaussian":
+#             sim_param = imp_sample_prop * p1 + (1.0 - imp_sample_prop) * p0
+#         else:
+#             raise Exception("Unrecognized hyp type ", hyp_type)
 
-        weight_out = []
-        max_imp_samples = int(n_reps * imp_sample_hedge)
-        do_imp = True
-    else:
-        sim_param = p0
+#         weight_out = []
+#         max_imp_samples = int(n_reps * imp_sample_hedge)
+#         do_imp = True
+#     else:
+#         sim_param = p0
 
-        do_imp = False
+#         do_imp = False
 
-    # Set up iterator and logging for parallelization.
-    logger = logging.getLogger()
-    if job_id == 0:
-        logger.setLevel(logging.DEBUG)
-        range_vec = tqdm(range(n_reps), desc="MC cutoff simulations, Job 0")
-        logger.debug("Simulating {0} with param {1}".format(hyp_type, sim_param))
-    else:
-        logger.setLevel(logging.INFO)
-        range_vec = range(n_reps)
+#     # Set up iterator and logging for parallelization.
+#     logger = logging.getLogger()
+#     if job_id == 0:
+#         logger.setLevel(logging.DEBUG)
+#         range_vec = tqdm(range(n_reps), desc="MC cutoff simulations, Job 0")
+#         logger.debug("Simulating {0} with param {1}".format(hyp_type, sim_param))
+#     else:
+#         logger.setLevel(logging.INFO)
+#         range_vec = range(n_reps)
 
-    # Perform MC iterations.
-    for it, i in enumerate(range_vec):
-        if it % int(len(range_vec) / 5.0) == 1:
-            print("job {0} is on {1}".format(job_id, it))
+#     # Perform MC iterations.
+#     for it, i in enumerate(range_vec):
+#         if it % int(len(range_vec) / 5.0) == 1:
+#             print("job {0} is on {1}".format(job_id, it))
 
-        # Switch to true H0 after max_imp_samples
-        if do_imp and (i >= max_imp_samples):
-            logger.debug("Switch to H0 at {0} of {1}.".format(i, n_reps))
-            do_imp = False
-            sim_param = p0
+#         # Switch to true H0 after max_imp_samples
+#         if do_imp and (i >= max_imp_samples):
+#             logger.debug("Switch to H0 at {0} of {1}.".format(i, n_reps))
+#             do_imp = False
+#             sim_param = p0
 
-        if (hyp_type is None) or (hyp_type == "drug"):
-            # DRR_FACTOR = .8
-            amnesia, nonamnesia = data_funcs.simulate_reactions(
-                sim_param * drr, (1.0 - sim_param) * drr, n_periods
-            )
-            llr = data_funcs.assemble_drug_llr((amnesia, nonamnesia), p0, p1)
-            if imp_sample:
-                weight_out.append(
-                    imp_sample_drug_weight((amnesia, nonamnesia), p0, sim_param)
-                )
+#         if (hyp_type is None) or (hyp_type == "drug"):
+#             # DRR_FACTOR = .8
+#             amnesia, nonamnesia = data_funcs.simulate_reactions(
+#                 sim_param * drr, (1.0 - sim_param) * drr, n_periods
+#             )
+#             llr = data_funcs.assemble_drug_llr((amnesia, nonamnesia), p0, p1)
+#             if imp_sample:
+#                 weight_out.append(
+#                     imp_sample_drug_weight((amnesia, nonamnesia), p0, sim_param)
+#                 )
 
-        elif hyp_type == "binom":
-            amnesia = data_funcs.simulate_binom(
-                pd.Series(sim_param * np.ones(len(drr)), index=drr.index), n_periods
-            )
-            llr = data_funcs.assemble_binom_llr(amnesia, p0, p1)
-            if imp_sample:
-                weight_out.append(imp_sample_binom_weight(amnesia, p0, sim_param))
-        elif hyp_type == "pois":
-            amnesia = data_funcs.simulate_pois(
-                pd.Series(sim_param * np.ones(len(drr)), index=drr.index), n_periods
-            )
-            llr = data_funcs.assemble_pois_llr(amnesia, p0, p1)
-            if imp_sample:
-                weight_out.append(imp_sample_pois_weight(amnesia, p0, sim_param))
-        elif hyp_type == "gaussian":
-            amnesia = data_funcs.simulate_gaussian_noncum(
-                pd.Series(sim_param * np.ones(len(drr)), index=drr.index),
-                drr,
-                n_periods,
-            )
-            llr = data_funcs.assemble_gaussian_llr(amnesia, p0, p1)
-            if imp_sample:
-                weight_out.append(
-                    imp_sample_gaussian_weight(amnesia, p0, sim_param, drr)
-                )
-        else:
-            raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
+#         elif hyp_type == "binom":
+#             amnesia = data_funcs.simulate_binom(
+#                 pd.Series(sim_param * np.ones(len(drr)), index=drr.index), n_periods
+#             )
+#             llr = data_funcs.assemble_binom_llr(amnesia, p0, p1)
+#             if imp_sample:
+#                 weight_out.append(imp_sample_binom_weight(amnesia, p0, sim_param))
+#         elif hyp_type == "pois":
+#             amnesia = data_funcs.simulate_pois(
+#                 pd.Series(sim_param * np.ones(len(drr)), index=drr.index), n_periods
+#             )
+#             llr = data_funcs.assemble_pois_llr(amnesia, p0, p1)
+#             if imp_sample:
+#                 weight_out.append(imp_sample_pois_weight(amnesia, p0, sim_param))
+#         elif hyp_type == "gaussian":
+#             amnesia = data_funcs.simulate_gaussian_noncum(
+#                 pd.Series(sim_param * np.ones(len(drr)), index=drr.index),
+#                 drr,
+#                 n_periods,
+#             )
+#             llr = data_funcs.assemble_gaussian_llr(amnesia, p0, p1)
+#             if imp_sample:
+#                 weight_out.append(
+#                     imp_sample_gaussian_weight(amnesia, p0, sim_param, drr)
+#                 )
+#         else:
+#             raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
 
-        if np.isnan(llr).any().any():
-            raise ValueError("NaN in llr at iter {0}".format(i))
-        if imp_sample and np.isnan(np.array(weight_out)).any().any():
-            raise ValueError("NaN in weights at iter {0}".format(i))
-        #            # Record the max value the each llr path reached
-        out_rec.append(llr.max(0))
-    out_rec = np.array(out_rec)
+#         if np.isnan(llr).any().any():
+#             raise ValueError("NaN in llr at iter {0}".format(i))
+#         if imp_sample and np.isnan(np.array(weight_out)).any().any():
+#             raise ValueError("NaN in weights at iter {0}".format(i))
+#         #            # Record the max value the each llr path reached
+#         out_rec.append(llr.max(0))
+#     out_rec = np.array(out_rec)
 
-    if imp_sample:
-        return out_rec, np.array(weight_out)
+#     if imp_sample:
+#         return out_rec, np.array(weight_out)
 
-    else:
-        return out_rec, np.ones_like(out_rec)
+#     else:
+#         return out_rec, np.ones_like(out_rec)
 
 
-def finite_horizon_cutoff_simulation_wrapper(
-    kwargs: Dict[str, Any]
-) -> Tuple[FloatArray, FloatArray]:
-    """Simple wrapper for finite horizon MC reps for cutoff calculation that takes a single dict arg.
+# def finite_horizon_cutoff_simulation_wrapper(
+#     kwargs: Dict[str, Any]
+# ) -> Tuple[FloatArray, FloatArray]:
+#     """Simple wrapper for finite horizon MC reps for cutoff calculation that takes a single dict arg.
 
-    Wraps finite_horizon_cutoff_simulation with all arguments wrapped into a
-    single dictionary. Useful for parallelization.
+#     Wraps finite_horizon_cutoff_simulation with all arguments wrapped into a
+#     single dictionary. Useful for parallelization.
 
-    Args:
-        kwargs (Dict[str, Any]): All the arguments to
-            finite_horizon_cutoff_simulation in a dictionary. See that funcs
-            docstring for details
+#     Args:
+#         kwargs (Dict[str, Any]): All the arguments to
+#             finite_horizon_cutoff_simulation in a dictionary. See that funcs
+#             docstring for details
 
-    Returns:
-        Tuple[FloatArray, FloatArray]: _description_
-    """
-    np.random.seed(kwargs["job_id"])
-    try:
-        return finite_horizon_cutoff_simulation(**kwargs)
-    except:
-        print(traceback.format_exc())
-        return np.array([]), np.array([])
+#     Returns:
+#         Tuple[FloatArray, FloatArray]: _description_
+#     """
+#     np.random.seed(kwargs["job_id"])
+#     try:
+#         return finite_horizon_cutoff_simulation(**kwargs)
+#     except:
+#         print(traceback.format_exc())
+#         return np.array([]), np.array([])
 
 
 ALPHA_SHIFT = 0.0
@@ -946,279 +1114,279 @@ def empirical_quant_presim_wrapper(kwargs):
     return stream_specific_cutoff_levels
 
 
-def finite_horizon_rejective_cutoffs(
-    rate_data,
-    p0,
-    p1,
-    alpha_levels,
-    n_periods,
-    k_reps,
-    dbg=False,
-    do_parallel=False,
-    hyp_type="drug",
-    sleep_time=5,
-    normal_approx: bool = False,
-    imp_sample: bool = True,
-    imp_sample_prop=0.5,
-    imp_sample_hedge=0.9,
-    divide_cores=None,
-):
-    """Calculate finite horizon rejective cutoffs from alpha levels using MC for drug sim.
+# def finite_horizon_rejective_cutoffs(
+#     rate_data,
+#     p0,
+#     p1,
+#     alpha_levels,
+#     n_periods,
+#     k_reps,
+#     dbg=False,
+#     do_parallel=False,
+#     hyp_type="drug",
+#     sleep_time=5,
+#     normal_approx: bool = False,
+#     imp_sample: bool = True,
+#     imp_sample_prop=0.5,
+#     imp_sample_hedge=0.9,
+#     divide_cores=None,
+# ):
+#     """Calculate finite horizon rejective cutoffs from alpha levels using MC for drug sim.
 
-    Number of simulations should exceed the inverse of the min diff of the
-    alpha vector, otherwise you might end up with the same cutoff values for
-    multiple levels.
-    args:
-        rate_data: vector of emission rates
-        p0: null p
-        p1: alt p
-        alpha_levels: type 1 levels for which cutoffs should be calculated
-        n_periods: finite horizon
-        k_reps: number of MC sims for
-    return:
-        array of cutoff values which should be > 0
+#     Number of simulations should exceed the inverse of the min diff of the
+#     alpha vector, otherwise you might end up with the same cutoff values for
+#     multiple levels.
+#     args:
+#         rate_data: vector of emission rates
+#         p0: null p
+#         p1: alt p
+#         alpha_levels: type 1 levels for which cutoffs should be calculated
+#         n_periods: finite horizon
+#         k_reps: number of MC sims for
+#     return:
+#         array of cutoff values which should be > 0
 
-    """
-    drr = pd.Series(rate_data)
-    record = []
-    print("Num hyps", len(drr))
-    print("n per", n_periods)
+#     """
+#     drr = pd.Series(rate_data)
+#     record = []
+#     print("Num hyps", len(drr))
+#     print("n per", n_periods)
 
-    ten_pct = int(k_reps / 10.0)
-    # Run simulation k_reps times
-    # TODO: what is happening here?
-    record_raw = finite_horizon_cutoff_simulation_wrapper(
-        {
-            "p0": p0,
-            "p1": p1,
-            "drr": drr,
-            "n_periods": n_periods,
-            "n_reps": k_reps,
-            "job_id": 0,
-            "hyp_type": hyp_type,
-            "imp_sample": imp_sample,
-            "imp_sample_prop": imp_sample_prop,
-            "imp_sample_hedge": imp_sample_hedge,
-        }
-    )
-    if imp_sample:
-        record, weights = record_raw
-    else:
-        record = record_raw
-    # Combine all path maximums into one array.
-    # Shape is (# of reps, # of hyps)
-    record = np.array(record)
+#     ten_pct = int(k_reps / 10.0)
+#     # Run simulation k_reps times
+#     # TODO: what is happening here?
+#     record_raw = finite_horizon_cutoff_simulation_wrapper(
+#         {
+#             "p0": p0,
+#             "p1": p1,
+#             "drr": drr,
+#             "n_periods": n_periods,
+#             "n_reps": k_reps,
+#             "job_id": 0,
+#             "hyp_type": hyp_type,
+#             "imp_sample": imp_sample,
+#             "imp_sample_prop": imp_sample_prop,
+#             "imp_sample_hedge": imp_sample_hedge,
+#         }
+#     )
+#     if imp_sample:
+#         record, weights = record_raw
+#     else:
+#         record = record_raw
+#     # Combine all path maximums into one array.
+#     # Shape is (# of reps, # of hyps)
+#     record = np.array(record)
 
-    # Get the cutoffs for each individual stream, either exact or using a tdist
-    if normal_approx:
-        warnings.warn("Using normal approximation for quantile estimation.")
+#     # Get the cutoffs for each individual stream, either exact or using a tdist
+#     if normal_approx:
+#         warnings.warn("Using normal approximation for quantile estimation.")
 
-        #        fit_vals = [tdist.fit(record[:,ii]) for ii in tqdm(range(len(rate_data)), desc="t dist fits")]
-        #        stream_specific_cutoff_levels = array([tdist(*t_dist_vals).ppf(1-alpha_levels) for t_dist_vals in tqdm(fit_vals, desc="t dist quantiles")])
+#         #        fit_vals = [tdist.fit(record[:,ii]) for ii in tqdm(range(len(rate_data)), desc="t dist fits")]
+#         #        stream_specific_cutoff_levels = array([tdist(*t_dist_vals).ppf(1-alpha_levels) for t_dist_vals in tqdm(fit_vals, desc="t dist quantiles")])
 
-        fit_vals = [
-            stats.norm.fit(record[:, ii])
-            for ii in tqdm(range(len(rate_data)), desc="t dist fits")
-        ]
-        stream_specific_cutoff_levels = np.array(
-            [
-                stats.norm(*dist_vals).ppf(1 - alpha_levels)
-                for dist_vals in tqdm(fit_vals, desc="t dist quantiles")
-            ]
-        )
-    if imp_sample:
-        stream_specific_cutoff_levels = empirical_quant_presim_wrapper(
-            {
-                "record": record,
-                "weights": weights,
-                "alpha_levels": alpha_levels,
-                "job_id": 0,
-            }
-        )
+#         fit_vals = [
+#             stats.norm.fit(record[:, ii])
+#             for ii in tqdm(range(len(rate_data)), desc="t dist fits")
+#         ]
+#         stream_specific_cutoff_levels = np.array(
+#             [
+#                 stats.norm(*dist_vals).ppf(1 - alpha_levels)
+#                 for dist_vals in tqdm(fit_vals, desc="t dist quantiles")
+#             ]
+#         )
+#     if imp_sample:
+#         stream_specific_cutoff_levels = empirical_quant_presim_wrapper(
+#             {
+#                 "record": record,
+#                 "weights": weights,
+#                 "alpha_levels": alpha_levels,
+#                 "job_id": 0,
+#             }
+#         )
 
-    else:
-        stream_specific_cutoff_levels = empirical_quant_presim_wrapper(
-            {
-                "record": record,
-                "weights": np.ones(record.shape),
-                "alpha_levels": alpha_levels,
-                "job_id": 0,
-            }
-        )
-    #        stream_specific_cutoff_levels = percentile(record, 100 * (1 - alpha_levels), axis=0)
+#     else:
+#         stream_specific_cutoff_levels = empirical_quant_presim_wrapper(
+#             {
+#                 "record": record,
+#                 "weights": np.ones(record.shape),
+#                 "alpha_levels": alpha_levels,
+#                 "job_id": 0,
+#             }
+#         )
+#     #        stream_specific_cutoff_levels = percentile(record, 100 * (1 - alpha_levels), axis=0)
 
-    # Take the max across streams for each cutoff.
-    # Take A_j = max_i A_j^i, then
-    # P(Lambda^i > A_j) < P(Lambda^i > A_j^i) < alpha_j
-    cutoff_levels = stream_specific_cutoff_levels.max(1)
+#     # Take the max across streams for each cutoff.
+#     # Take A_j = max_i A_j^i, then
+#     # P(Lambda^i > A_j) < P(Lambda^i > A_j^i) < alpha_j
+#     cutoff_levels = stream_specific_cutoff_levels.max(1)
 
-    #    from IPython.display import display
-    #    display(cutoff_levels)
+#     #    from IPython.display import display
+#     #    display(cutoff_levels)
 
-    if (cutoff_levels < 0).any():
-        num_neg = (cutoff_levels < 0).sum()
+#     if (cutoff_levels < 0).any():
+#         num_neg = (cutoff_levels < 0).sum()
 
-        warnings.warn(
-            "{0} Cutoff levels are negative: from {1} to {2}".format(
-                num_neg, cutoff_levels.min(), cutoff_levels.max()
-            )
-        )
+#         warnings.warn(
+#             "{0} Cutoff levels are negative: from {1} to {2}".format(
+#                 num_neg, cutoff_levels.min(), cutoff_levels.max()
+#             )
+#         )
 
-    if dbg:
-        return cutoff_levels, record
-    else:
-        return cutoff_levels
+#     if dbg:
+#         return cutoff_levels, record
+#     else:
+#         return cutoff_levels
 
 
-def infinite_horizon_MC_cutoffs(
-    rate_data: pd.Series,
-    p0: float,
-    p1: float,
-    alpha_levels: FloatArray,
-    beta_levels: FloatArray,
-    n_periods: int,
-    k_reps: int,
-    pair_iters: int = 10,
-    hyp_type: Optional[str] = None,
-    dbg: bool = False,
-) -> FloatArray:
-    """Calculate finite horizon rejective cutoffs from alpha levels using MC for drug sims.
+# def infinite_horizon_MC_cutoffs(
+#     rate_data: pd.Series,
+#     p0: float,
+#     p1: float,
+#     alpha_levels: FloatArray,
+#     beta_levels: FloatArray,
+#     n_periods: int,
+#     k_reps: int,
+#     pair_iters: int = 10,
+#     hyp_type: Optional[str] = None,
+#     dbg: bool = False,
+# ) -> FloatArray:
+#     """Calculate finite horizon rejective cutoffs from alpha levels using MC for drug sims.
 
-    Number of simulations should exceed the inverse of the min diff of the
-    alpha vector, otherwise you might end up with the same cutoff values for
-    multiple levels.
-    Does not depend on step up or step down, as the condition for which the cutoffs
-    are calculated depends only on the test statistic exceeding a threshold.
+#     Number of simulations should exceed the inverse of the min diff of the
+#     alpha vector, otherwise you might end up with the same cutoff values for
+#     multiple levels.
+#     Does not depend on step up or step down, as the condition for which the cutoffs
+#     are calculated depends only on the test statistic exceeding a threshold.
 
-    args:
-        rate_data: vector of emission rates
-        p0: null p
-        p1: alt p
-        alpha_levels: type 1 levels for which cutoffs should be calculated
-        n_periods: finite horizon
-        k_reps: number of MC sims to run
-    return:
-        array of cutoff values which should be > 0
+#     args:
+#         rate_data: vector of emission rates
+#         p0: null p
+#         p1: alt p
+#         alpha_levels: type 1 levels for which cutoffs should be calculated
+#         n_periods: finite horizon
+#         k_reps: number of MC sims to run
+#     return:
+#         array of cutoff values which should be > 0
 
-    """
-    if dbg:
-        raise NotImplementedError("For shame.")
+#     """
+#     if dbg:
+#         raise NotImplementedError("For shame.")
 
-    drr = pd.Series(rate_data)
+#     drr = pd.Series(rate_data)
 
-    rej_max = 0.0
-    acc_min = 0.0
-    # Run simulation k_reps times
-    for pair_num in trange(pair_iters, desc="Pairs of rej/acc"):
-        rej_record = []
-        for mc_it_number in trange(
-            k_reps, desc="Rej MC cutoff simulations", leave=False
-        ):
-            # Simulate n_periods worth of data under the null with the provided
-            # rates.
-            if (hyp_type is None) or (hyp_type == "drug"):
-                (
-                    sim_amnesia_reactions,
-                    sim_nonamnesia_reactions,
-                ) = data_funcs.simulate_reactions(p0 * drr, (1.0 - p0) * drr, n_periods)
+#     rej_max = 0.0
+#     acc_min = 0.0
+#     # Run simulation k_reps times
+#     for pair_num in trange(pair_iters, desc="Pairs of rej/acc"):
+#         rej_record = []
+#         for mc_it_number in trange(
+#             k_reps, desc="Rej MC cutoff simulations", leave=False
+#         ):
+#             # Simulate n_periods worth of data under the null with the provided
+#             # rates.
+#             if (hyp_type is None) or (hyp_type == "drug"):
+#                 (
+#                     sim_amnesia_reactions,
+#                     sim_nonamnesia_reactions,
+#                 ) = data_funcs.simulate_reactions(p0 * drr, (1.0 - p0) * drr, n_periods)
 
-                # Compute llr paths for data
-                llr = data_funcs.assemble_drug_llr(
-                    (sim_amnesia_reactions, sim_nonamnesia_reactions), p0, p1
-                )
-            elif hyp_type == "binom":
-                amnesia = data_funcs.simulate_binom(
-                    pd.Series(p0 * np.ones(len(drr)), index=drr.index), n_periods
-                )
-                llr = data_funcs.assemble_binom_llr(amnesia, p0, p1)
-            elif hyp_type == "pois":
-                amnesia = data_funcs.simulate_pois(
-                    pd.Series(p0 * np.ones(len(drr)), index=drr.index), n_periods
-                )
-                llr = data_funcs.assemble_pois_llr(amnesia, p0, p1)
-            elif hyp_type == "gaussian":
-                amnesia = data_funcs.simulate_gaussian_noncum(
-                    pd.Series(p0 * np.ones(len(drr)), index=drr.index), drr, n_periods
-                )
-                llr = data_funcs.assemble_gaussian_llr(amnesia, p0, p1)
-            else:
-                raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
+#                 # Compute llr paths for data
+#                 llr = data_funcs.assemble_drug_llr(
+#                     (sim_amnesia_reactions, sim_nonamnesia_reactions), p0, p1
+#                 )
+#             elif hyp_type == "binom":
+#                 amnesia = data_funcs.simulate_binom(
+#                     pd.Series(p0 * np.ones(len(drr)), index=drr.index), n_periods
+#                 )
+#                 llr = data_funcs.assemble_binom_llr(amnesia, p0, p1)
+#             elif hyp_type == "pois":
+#                 amnesia = data_funcs.simulate_pois(
+#                     pd.Series(p0 * np.ones(len(drr)), index=drr.index), n_periods
+#                 )
+#                 llr = data_funcs.assemble_pois_llr(amnesia, p0, p1)
+#             elif hyp_type == "gaussian":
+#                 amnesia = data_funcs.simulate_gaussian_noncum(
+#                     pd.Series(p0 * np.ones(len(drr)), index=drr.index), drr, n_periods
+#                 )
+#                 llr = data_funcs.assemble_gaussian_llr(amnesia, p0, p1)
+#             else:
+#                 raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
 
-            llr[llr < acc_min] = 0.0
-            # Record the max value the each llr path reached
-            rej_record.append(llr.max(0))
+#             llr[llr < acc_min] = 0.0
+#             # Record the max value the each llr path reached
+#             rej_record.append(llr.max(0))
 
-        # Get the cutoffs for each individual stream.
-        rej_stream_specific_cutoff_levels = np.percentile(
-            np.array(rej_record), 100 * (1 - alpha_levels), axis=0
-        )
-        # Take the max across streams for each cutoff.
-        # Take A_j = max_i A_j^i, then
-        # P(Lambda^i > A_j) < P(Lambda^i > A_j^i) < alpha_j
-        rej_cutoff_levels = rej_stream_specific_cutoff_levels.max(1)
-        rej_max = rej_cutoff_levels.max()
+#         # Get the cutoffs for each individual stream.
+#         rej_stream_specific_cutoff_levels = np.percentile(
+#             np.array(rej_record), 100 * (1 - alpha_levels), axis=0
+#         )
+#         # Take the max across streams for each cutoff.
+#         # Take A_j = max_i A_j^i, then
+#         # P(Lambda^i > A_j) < P(Lambda^i > A_j^i) < alpha_j
+#         rej_cutoff_levels = rej_stream_specific_cutoff_levels.max(1)
+#         rej_max = rej_cutoff_levels.max()
 
-        acc_record = []
-        for mc_it_number in tqdm(
-            range(k_reps), desc="Acc MC cutoff simulations", leave=False
-        ):
-            # Simulate n_periods worth of data under the null with the provided
-            # rates.
-            if (hyp_type is None) or (hyp_type == "drug"):
-                (
-                    sim_amnesia_reactions,
-                    sim_nonamnesia_reactions,
-                ) = data_funcs.simulate_reactions(p1 * drr, (1.0 - p1) * drr, n_periods)
+#         acc_record = []
+#         for mc_it_number in tqdm(
+#             range(k_reps), desc="Acc MC cutoff simulations", leave=False
+#         ):
+#             # Simulate n_periods worth of data under the null with the provided
+#             # rates.
+#             if (hyp_type is None) or (hyp_type == "drug"):
+#                 (
+#                     sim_amnesia_reactions,
+#                     sim_nonamnesia_reactions,
+#                 ) = data_funcs.simulate_reactions(p1 * drr, (1.0 - p1) * drr, n_periods)
 
-                # Compute llr paths for data
-                llr = data_funcs.assemble_drug_llr(
-                    (sim_amnesia_reactions, sim_nonamnesia_reactions), p0, p1
-                )
-            elif hyp_type == "binom":
-                amnesia = data_funcs.simulate_binom(
-                    pd.Series(p1 * np.ones(len(drr)), index=drr.index), n_periods
-                )
-                llr = data_funcs.assemble_binom_llr(amnesia, p0, p1)
-            elif hyp_type == "pois":
-                amnesia = data_funcs.simulate_pois(
-                    pd.Series(p1 * np.ones(len(drr)), index=drr.index), n_periods
-                )
-                llr = data_funcs.assemble_pois_llr(amnesia, p0, p1)
-            elif hyp_type == "gaussian":
-                amnesia = data_funcs.simulate_gaussian_noncum(
-                    pd.Series(p1 * np.ones(len(drr)), index=drr.index), drr, n_periods
-                )
-                llr = data_funcs.assemble_gaussian_llr(amnesia, p0, p1)
-            else:
-                raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
+#                 # Compute llr paths for data
+#                 llr = data_funcs.assemble_drug_llr(
+#                     (sim_amnesia_reactions, sim_nonamnesia_reactions), p0, p1
+#                 )
+#             elif hyp_type == "binom":
+#                 amnesia = data_funcs.simulate_binom(
+#                     pd.Series(p1 * np.ones(len(drr)), index=drr.index), n_periods
+#                 )
+#                 llr = data_funcs.assemble_binom_llr(amnesia, p0, p1)
+#             elif hyp_type == "pois":
+#                 amnesia = data_funcs.simulate_pois(
+#                     pd.Series(p1 * np.ones(len(drr)), index=drr.index), n_periods
+#                 )
+#                 llr = data_funcs.assemble_pois_llr(amnesia, p0, p1)
+#             elif hyp_type == "gaussian":
+#                 amnesia = data_funcs.simulate_gaussian_noncum(
+#                     pd.Series(p1 * np.ones(len(drr)), index=drr.index), drr, n_periods
+#                 )
+#                 llr = data_funcs.assemble_gaussian_llr(amnesia, p0, p1)
+#             else:
+#                 raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
 
-            llr[llr > rej_max] = 0.0
-            # Record the max value the each llr path reached
-            acc_record.append(llr.min(0))
+#             llr[llr > rej_max] = 0.0
+#             # Record the max value the each llr path reached
+#             acc_record.append(llr.min(0))
 
-        # Get the cutoffs for each individual stream.
-        acc_stream_specific_cutoff_levels = np.percentile(
-            np.array(acc_record), 100 * beta_levels, axis=0
-        )
-        # Take the max across streams for each cutoff.
-        # Take A_j = max_i A_j^i, then
-        # P(Lambda^i > A_j) < P(Lambda^i > A_j^i) < alpha_j
-        acc_cutoff_levels = acc_stream_specific_cutoff_levels.min(1)
-        acc_max = acc_cutoff_levels.min()
+#         # Get the cutoffs for each individual stream.
+#         acc_stream_specific_cutoff_levels = np.percentile(
+#             np.array(acc_record), 100 * beta_levels, axis=0
+#         )
+#         # Take the max across streams for each cutoff.
+#         # Take A_j = max_i A_j^i, then
+#         # P(Lambda^i > A_j) < P(Lambda^i > A_j^i) < alpha_j
+#         acc_cutoff_levels = acc_stream_specific_cutoff_levels.min(1)
+#         acc_max = acc_cutoff_levels.min()
 
-    # if dbg:
-    #     # This is very bad form.
-    #     return cutoff_levels, record
-    # else:
+#     # if dbg:
+#     #     # This is very bad form.
+#     #     return cutoff_levels, record
+#     # else:
 
-    return rej_cutoff_levels, acc_cutoff_levels
+#     return rej_cutoff_levels, acc_cutoff_levels
 
 
 def llr_term_moments(drr: pd.Series, p0: float, p1: float) -> pd.DataFrame:
     """Expectation of the llr terms for a drug sim  under the null hypothesis for each step.
 
-    Used for calculating finite horizon cutoffs via gaussian approximation of 
-    the llr statistic path. Assumes temporal independence and thus a simple 
+    Used for calculating finite horizon cutoffs via gaussian approximation of
+    the llr statistic path. Assumes temporal independence and thus a simple
     hypothesis.
 
     Args:
@@ -1228,8 +1396,8 @@ def llr_term_moments(drr: pd.Series, p0: float, p1: float) -> pd.DataFrame:
         p1 (float): alternative hypothesis probability.
 
     Returns:
-        pd.DataFrame: with two columns: 
-            term_mean: the expected value of an individual term's (or stage's) 
+        pd.DataFrame: with two columns:
+            term_mean: the expected value of an individual term's (or stage's)
             contribution to the llr statistic
             term_var: variance of each term's contribution.
     """
@@ -1261,7 +1429,7 @@ def llr_binom_term_moments(p0: pd.Series, p1: pd.Series) -> pd.DataFrame:
     return pd.DataFrame({"term_mean": term_mean, "term_var": term_var})
 
 
-def llr_pois_term_moments(lam0:pd.Series, lam1:pd.Series) -> pd.DataFrame:
+def llr_pois_term_moments(lam0: pd.Series, lam1: pd.Series) -> pd.DataFrame:
     """Calculates mean and variance of one step for a poisson llr.
 
     Args:
@@ -1300,7 +1468,9 @@ def llr_pois_term_moments(lam0:pd.Series, lam1:pd.Series) -> pd.DataFrame:
 
 
 # From govindarajulu. Expected stopping times for a single hypothesis
-def single_hyp_sequential_expected_acceptance_time(A:float, B:float, mu_1:float) -> int:
+def single_hyp_sequential_expected_acceptance_time(
+    A: float, B: float, mu_1: float
+) -> int:
     """Expected acceptance time for single hypothesis SPRT from govindarajulu.
 
     Args:
@@ -1311,11 +1481,15 @@ def single_hyp_sequential_expected_acceptance_time(A:float, B:float, mu_1:float)
     Returns:
         int: expected number of steps until termination.
     """
-    return int((B * np.exp(B) * (np.exp(A) - 1) + A * np.exp(A) * (1 - np.exp(B))) / (
-        (np.exp(A) - np.exp(B)) * mu_1
-    ))
+    return int(
+        (B * np.exp(B) * (np.exp(A) - 1) + A * np.exp(A) * (1 - np.exp(B)))
+        / ((np.exp(A) - np.exp(B)) * mu_1)
+    )
 
-def single_hyp_sequential_expected_rejection_time(A: float, B:float, mu_0:float) -> int:
+
+def single_hyp_sequential_expected_rejection_time(
+    A: float, B: float, mu_0: float
+) -> int:
     """Expected rejection time for single hypothesis SPRT from govindarajulu.
 
     Args:
@@ -1326,11 +1500,14 @@ def single_hyp_sequential_expected_rejection_time(A: float, B:float, mu_0:float)
     Returns:
         int: expected number of steps until termination.
     """
-    return (int(B * (np.exp(A) - 1) + A * (1 - np.exp(B))) / (
+    return int(B * (np.exp(A) - 1) + A * (1 - np.exp(B))) / (
         (np.exp(A) - np.exp(B)) * mu_0
-    ))
+    )
 
-def llr_term_mean_general(params0: Dict[str, Any], params1: Dict[str, Any], hyp_type: HypTypes) -> pd.Series:
+
+def llr_term_mean_general(
+    params0: Dict[str, Any], params1: Dict[str, Any], hyp_type: HypTypes
+) -> pd.Series:
     """Calculate the expected value of the llr terms for a general hypothesis test.
 
     Args:
@@ -1359,19 +1536,38 @@ def llr_term_mean_general(params0: Dict[str, Any], params1: Dict[str, Any], hyp_
     else:
         raise ValueError("Unknown type {0}".format(hyp_type))
 
-def cutoff_verifier(A_vec: Union[np.ndarray, pd.Series], B_vec: Union[np.ndarray, pd.Series]):
+
+def llr_cutoff_verifier(
+    A_vec: Union[np.ndarray, pd.Series],
+    B_vec: Union[np.ndarray, pd.Series, None] = None,
+):
     """Verify that the cutoffs are in the correct order and are the same length."""
     if isinstance(A_vec, pd.Series):
         A_vec = A_vec.values
-    if isinstance(B_vec, pd.Series):
-        B_vec = B_vec.values
-    assert (np.diff(A_vec)<0).all(), "A_vec is not in descending order"
-    assert (np.diff(B_vec)>0).all(), "B_vec is not in ascending order"
-    assert len(A_vec) == len(B_vec), "A_vec and B_vec are not the same length"
+    assert (np.diff(A_vec) < 0).all(), "A_vec is not in descending order"
     assert A_vec[-1] > 0, "A_vec[-1] is not greater than 0"
-    assert B_vec[-1] < 0, "B_vec[-1] is not less than 0"
+    if B_vec is not None:
+        if isinstance(B_vec, pd.Series):
+            B_vec = B_vec.values
+        assert (np.diff(B_vec) > 0).all(), "B_vec is not in ascending order"
+        assert len(A_vec) == len(B_vec), "A_vec and B_vec are not the same length"
+        assert B_vec[-1] < 0, "B_vec[-1] is not less than 0"
 
-def est_sample_size_general(
+
+def pvalue_cutoff_verifier(
+    alpha: Union[np.ndarray, pd.Series],
+    beta: Union[np.ndarray, pd.Series, None] = None,
+):
+    """Verify pvalue cutoffs ordering and length."""
+    assert (alpha > 0).all(), "alpha is not greater than 0"
+    assert (np.diff(alpha) > 0).all(), "alpha is not in ascending order"
+    if beta is not None:
+        assert (beta > 0).all(), "beta is not greater than 0"
+        assert (np.diff(beta) > 0).all(), "beta is not in ascending order"
+        assert len(alpha) == len(beta), "alpha and beta are not the same length"
+
+
+def est_sample_size(
     A_vec: FloatArray,
     B_vec: FloatArray,
     params0: Dict[str, Any],
@@ -1380,9 +1576,9 @@ def est_sample_size_general(
 ) -> int:
     """Estimate the sample size needed to accept or reject all hypotheses.
 
-    in general, very conservative. Calculates expected rejection and 
+    in general, very conservative. Calculates expected rejection and
     acceptance times for the worst case cutoffs and worst case
-    hypotheses, then takes the worst of the two. The expectation could 
+    hypotheses, then takes the worst of the two. The expectation could
     be misleading, but given the pairing of worst case hypothesis with
     worst case cutoff, unlikely to underestimate.
 
@@ -1398,10 +1594,10 @@ def est_sample_size_general(
     Returns:
         int: The estimated sample size needed to accept or reject all hypotheses
     """
-    cutoff_verifier(A_vec, B_vec)
+    llr_cutoff_verifier(A_vec, B_vec)
     negative_drift_under_null = llr_term_mean_general(params0, params1, hyp_type)
     positive_drift_under_alt = -llr_term_mean_general(params1, params0, hyp_type)
-    
+
     # Get slowest drifting hypotheses, ie worst case.
     mu_0 = (negative_drift_under_null).max()
     mu_1 = (positive_drift_under_alt).min()
@@ -1410,78 +1606,77 @@ def est_sample_size_general(
     most_extreme_acc_cutoff = B_vec[0]
     # Get expected stopping time for absolute worst case rej and acc
     max_expected_acceptance_time = single_hyp_sequential_expected_acceptance_time(
-        most_extreme_rej_cutoff, 
-        most_extreme_acc_cutoff, 
+        most_extreme_rej_cutoff,
+        most_extreme_acc_cutoff,
         mu_1,
-        )
+    )
     max_expected_rejection_time = single_hyp_sequential_expected_rejection_time(
-        most_extreme_rej_cutoff, 
-        most_extreme_acc_cutoff, 
+        most_extreme_rej_cutoff,
+        most_extreme_acc_cutoff,
         mu_0,
-        )
-    # Take the worst of those. 
+    )
+    # Take the worst of those.
     return max((max_expected_acceptance_time, max_expected_rejection_time))
 
 
-def est_sample_size(
-    A_vec: FloatArray,
-    B_vec: FloatArray,
-    theta0: pd.Series,
-    theta1: pd.Series,
-    hyp_type: Optional[HypTypes] = "drug",
-    extra_params: Optional[Dict[str, Any]] = None,
-) -> int:
-    """Estimate the sample size needed to accept or reject all hypotheses.
+# def est_sample_size(
+#     A_vec: FloatArray,
+#     B_vec: FloatArray,
+#     theta0: pd.Series,
+#     theta1: pd.Series,
+#     hyp_type: Optional[HypTypes] = "drug",
+#     extra_params: Optional[Dict[str, Any]] = None,
+# ) -> int:
+#     """Estimate the sample size needed to accept or reject all hypotheses.
 
-    in general, very conservative. Calculates expected rejection and 
-    acceptance times for the worst case cutoffs and worst case
-    hypotheses, then takes the worst of the two. The expectation could 
-    be misleading, but given the pairing of worst case hypothesis with
-    worst case cutoff, unlikely to underestimate.
+#     in general, very conservative. Calculates expected rejection and
+#     acceptance times for the worst case cutoffs and worst case
+#     hypotheses, then takes the worst of the two. The expectation could
+#     be misleading, but given the pairing of worst case hypothesis with
+#     worst case cutoff, unlikely to underestimate.
 
 
-    Args:
-        A_vec (np.array):   A_vec[i] is the rejective?? cutoff for the ith hypothesis
-        B_vec (np.array):   B_vec[i] is the acceptive?? cutoff for the ith hypothesis
-        drr (pd.Series):    drug use rate series for drug hyptotheses
-        p0 (float):         The null hypothesis probability (or poisson rate if hyp_type is "pois")
-        p1 (float):         The alternative hypothesis probability (or poisson rate if hyp_type is "pois")
-        hyp_type (str):     The type of hypothesis test to use.  One of "drug", "pois", or "binom"
+#     Args:
+#         A_vec (np.array):   A_vec[i] is the rejective?? cutoff for the ith hypothesis
+#         B_vec (np.array):   B_vec[i] is the acceptive?? cutoff for the ith hypothesis
+#         drr (pd.Series):    drug use rate series for drug hyptotheses
+#         p0 (float):         The null hypothesis probability (or poisson rate if hyp_type is "pois")
+#         p1 (float):         The alternative hypothesis probability (or poisson rate if hyp_type is "pois")
+#         hyp_type (str):     The type of hypothesis test to use.  One of "drug", "pois", or "binom"
 
-    Returns:
-        int: The estimated sample size needed to accept or reject all hypotheses
-    """
-    if (hyp_type is None) or (hyp_type == "drug"):
-        negative_drift_under_null = llr_term_moments(drr, p0, p1)["term_mean"]
-        positive_drift_under_alt = -llr_term_moments(drr, p1, p0)["term_mean"]
-    elif hyp_type == "pois":
-        negative_drift_under_null = llr_pois_term_moments(np.array([p0]), np.array([p1]))["term_mean"]
-        positive_drift_under_alt = -llr_pois_term_moments(np.array([p1]), np.array([p0]))["term_mean"]
-    elif hyp_type == "binom":
-        negative_drift_under_null = llr_binom_term_moments(np.array([p0]), np.array([p1]))["term_mean"]
-        positive_drift_under_alt = -llr_binom_term_moments(np.array([p1]), np.array([p0]))["term_mean"]
-    else:
-        raise ValueError("Unknown type {0}".format(hyp_type))
-    # Get slowest drifting hypotheses, ie worst case.
-    mu_0 = (negative_drift_under_null).max()
-    mu_1 = (positive_drift_under_alt).min()
-    # Get the most extreme cutoffs
-    most_extreme_rej_cutoff = A_vec[0]
-    most_extreme_acc_cutoff = B_vec[0]
-    # Get expected stopping time for absolute worst case rej and acc
-    max_expected_acceptance_time = single_hyp_sequential_expected_acceptance_time(
-        most_extreme_rej_cutoff, 
-        most_extreme_acc_cutoff, 
-        mu_1,
-        )
-    max_expected_rejection_time = single_hyp_sequential_expected_rejection_time(
-        most_extreme_rej_cutoff, 
-        most_extreme_acc_cutoff, 
-        mu_0,
-        )
-    # Take the worst of those. 
-    return max((max_expected_acceptance_time, max_expected_rejection_time))
-
+#     Returns:
+#         int: The estimated sample size needed to accept or reject all hypotheses
+#     """
+#     if (hyp_type is None) or (hyp_type == "drug"):
+#         negative_drift_under_null = llr_term_moments(drr, p0, p1)["term_mean"]
+#         positive_drift_under_alt = -llr_term_moments(drr, p1, p0)["term_mean"]
+#     elif hyp_type == "pois":
+#         negative_drift_under_null = llr_pois_term_moments(np.array([p0]), np.array([p1]))["term_mean"]
+#         positive_drift_under_alt = -llr_pois_term_moments(np.array([p1]), np.array([p0]))["term_mean"]
+#     elif hyp_type == "binom":
+#         negative_drift_under_null = llr_binom_term_moments(np.array([p0]), np.array([p1]))["term_mean"]
+#         positive_drift_under_alt = -llr_binom_term_moments(np.array([p1]), np.array([p0]))["term_mean"]
+#     else:
+#         raise ValueError("Unknown type {0}".format(hyp_type))
+#     # Get slowest drifting hypotheses, ie worst case.
+#     mu_0 = (negative_drift_under_null).max()
+#     mu_1 = (positive_drift_under_alt).min()
+#     # Get the most extreme cutoffs
+#     most_extreme_rej_cutoff = A_vec[0]
+#     most_extreme_acc_cutoff = B_vec[0]
+#     # Get expected stopping time for absolute worst case rej and acc
+#     max_expected_acceptance_time = single_hyp_sequential_expected_acceptance_time(
+#         most_extreme_rej_cutoff,
+#         most_extreme_acc_cutoff,
+#         mu_1,
+#         )
+#     max_expected_rejection_time = single_hyp_sequential_expected_rejection_time(
+#         most_extreme_rej_cutoff,
+#         most_extreme_acc_cutoff,
+#         mu_0,
+#         )
+#     # Take the worst of those.
+#     return max((max_expected_acceptance_time, max_expected_rejection_time))
 
 
 # Importance sampling section

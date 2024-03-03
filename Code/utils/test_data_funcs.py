@@ -221,7 +221,7 @@ class TestGeneralLLR:
         params0["p"][:] = 0.1
         params1 = copy.deepcopy(params)
         params1["p"][:] = 0.3
-        llr, obs = data_funcs.generate_llr_general(
+        llr, obs = data_funcs.generate_llr(
             params=params,
             n_periods=10,
             rho=0.6,
@@ -245,7 +245,7 @@ class TestGeneralLLR:
         params0["mu"][:] = 1.0
         params1 = copy.deepcopy(params)
         params1["mu"][:] = 3.0
-        llr, obs = data_funcs.generate_llr_general(
+        llr, obs = data_funcs.generate_llr(
             params=params,
             n_periods=10,
             rho=0.6,

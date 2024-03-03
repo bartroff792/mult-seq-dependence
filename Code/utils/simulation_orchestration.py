@@ -27,24 +27,10 @@ from . import multseq
 # import string
 from tqdm import tqdm
 from . import common_funcs
-from .cutoff_funcs import (
-    finite_horizon_rejective_cutoffs,
-    apply_fdr_controlled_alpha,
-    guo_rao_stepdown_fdr_level,
-    infinite_horizon_MC_cutoffs,
-    create_fdr_controlled_bl_alpha_indpt,
-)
+from .cutoff_funcs import create_fdr_controlled_bl_alpha_indpt
 from . import data_funcs
 from .data_funcs import (
-    assemble_fake_drugs,
-    assemble_fake_binom,
-    assemble_fake_pois,
-    assemble_fake_pois_grad,
-    assemble_fake_gaussian,
-    assemble_fake_binom_general,
-    assemble_fake_pois_general,
     generate_llr,
-    generate_llr_general,
     check_params,
 )
 from . import data_funcs, cutoff_funcs
@@ -283,7 +269,7 @@ def run_mc_synth_sim_tests(
     
     for i in main_iter:
         if rejective:
-            llr_data, obs_data = generate_llr_general(
+            llr_data, obs_data = generate_llr(
                 params=params,
                 n_periods=n_periods,
                 rho=rho,
@@ -482,7 +468,6 @@ def calc_sim_cutoffs(
     do_iterative_cutoff_MC_calc=False, # what is this?
     fin_par:bool=False,
     fh_sleep_time=6,
-    fh_cutoff_normal_approx=False,
     fh_cutoff_imp_sample=False,
     fh_cutoff_imp_sample_prop=1.0,
     fh_cutoff_imp_sample_hedge=0.9,
@@ -519,7 +504,7 @@ def calc_sim_cutoffs(
             raise NotImplementedError("Stepup not implemented for FDR control")
             scaled_alpha_vec = alpha_vec_raw / log(m_total)
         else:
-            scaled_alpha_vec = cutoff_funcs.apply_fdr_controlled_alpha(
+            scaled_alpha_vec = cutoff_funcs.apply_fdr_control_to_alpha_vec(
                     alpha, alpha_vec_raw, m0=m0,
                 )
     else:
@@ -552,7 +537,7 @@ def calc_sim_cutoffs(
                 raise NotImplementedError("Stepup not implemented for FDR control")
                 scaled_beta_vec = beta_vec_raw / log(m_total)
             else:
-                scaled_beta_vec = cutoff_funcs.apply_fdr_controlled_alpha(
+                scaled_beta_vec = cutoff_funcs.apply_fdr_control_to_alpha_vec(
                         beta, beta_vec_raw, m0=m0,
                     )
         else:
@@ -578,7 +563,7 @@ def calc_sim_cutoffs(
             # E[\tilde{\tau}] / n <= \delta
             # E[\tilde{\tau}] / \delta <= n
             n_periods = int(
-                cutoff_funcs.est_sample_size_general(
+                cutoff_funcs.est_sample_size(
                     A_vec, B_vec, params0, params1, hyp_type=hyp_type
                 )
                 / undershoot_prob
@@ -586,22 +571,22 @@ def calc_sim_cutoffs(
 
         if do_iterative_cutoff_MC_calc:
             raise NotImplementedError("Iterative cutoff MC calc not implemented. Too many bugs in this code")
-            min_alpha_diff = min(diff(scaled_alpha_vec))
-            min_beta_diff = min(diff(scaled_beta_vec))
-            k_reps = int(
-                1.0 / float(undershoot_prob * min((min_alpha_diff, min_beta_diff)))
-            )
-            infinite_horizon_MC_cutoffs(
-                drr,
-                p0,
-                p1,
-                scaled_alpha_vec,
-                scaled_beta_vec,
-                n_periods,
-                k_reps,
-                pair_iters=3,
-                hyp_type=hyp_type,
-            )
+            # min_alpha_diff = min(diff(scaled_alpha_vec))
+            # min_beta_diff = min(diff(scaled_beta_vec))
+            # k_reps = int(
+            #     1.0 / float(undershoot_prob * min((min_alpha_diff, min_beta_diff)))
+            # )
+            # infinite_horizon_MC_cutoffs(
+            #     drr,
+            #     p0,
+            #     p1,
+            #     scaled_alpha_vec,
+            #     scaled_beta_vec,
+            #     n_periods,
+            #     k_reps,
+            #     pair_iters=3,
+            #     hyp_type=hyp_type,
+            # )
 
         logging.info("n_periods: {0}".format(n_periods))
     else:  # Rejective
@@ -613,14 +598,13 @@ def calc_sim_cutoffs(
         k_reps = int(1.0 / float(undershoot_prob * min_alpha_diff))
 
         #        raise ValueError("Alpha min {0} max {1}".format(scaled_alpha_vec.min(), scaled_alpha_vec.max()))
-        A_vec = cutoff_funcs.finite_horizon_rejective_cutoffs_general(
+        A_vec = cutoff_funcs.estimate_finite_horizon_rejective_llr_cutoffs(
             params0=params0,
             params1=params1,
             hyp_type=hyp_type,
             n_periods=n_periods,
             alpha_levels=scaled_alpha_vec,
             k_reps=k_reps,
-            normal_approx=fh_cutoff_normal_approx,
             imp_sample=fh_cutoff_imp_sample,
             imp_sample_prop=fh_cutoff_imp_sample_prop,
         )
@@ -650,7 +634,6 @@ def calc_sim_cutoffs(
 #     sleep_time=25,
 #     do_iterative_cutoff_MC_calc=False,
 #     stepup=False,
-#     fh_cutoff_normal_approx=False,
 #     fh_cutoff_imp_sample=True,
 #     fh_cutoff_imp_sample_prop=0.5,
 #     fh_cutoff_imp_sample_hedge=0.9,
@@ -701,7 +684,6 @@ def calc_sim_cutoffs(
 #         sleep_time=sleep_time,
 #         do_iterative_cutoff_MC_calc=do_iterative_cutoff_MC_calc,
 #         stepup=stepup,
-#         fh_cutoff_normal_approx=fh_cutoff_normal_approx,
 #         fh_cutoff_imp_sample=fh_cutoff_imp_sample,
 #         fh_cutoff_imp_sample_prop=fh_cutoff_imp_sample_prop,
 #         fh_cutoff_imp_sample_hedge=fh_cutoff_imp_sample_hedge,
@@ -744,7 +726,6 @@ def calc_sim_cutoffs(
 #     sleep_time=25,
 #     do_iterative_cutoff_MC_calc=False,
 #     stepup=False,
-#     fh_cutoff_normal_approx=False,
 #     fh_cutoff_imp_sample=True,
 #     fh_cutoff_imp_sample_prop=0.5,
 #     fh_cutoff_imp_sample_hedge=0.9,
@@ -844,7 +825,6 @@ def calc_sim_cutoffs(
 #         do_iterative_cutoff_MC_calc=do_iterative_cutoff_MC_calc, # what is this?
 #         fin_par=fin_par,
 #         fh_sleep_time=fh_sleep_time,
-#         fh_cutoff_normal_approx=fh_cutoff_normal_approx,
 #         fh_cutoff_imp_sample=fh_cutoff_imp_sample,
 #         fh_cutoff_imp_sample_prop=fh_cutoff_imp_sample_prop,
 #         fh_cutoff_imp_sample_hedge=fh_cutoff_imp_sample_hedge,
@@ -1051,7 +1031,6 @@ def mc_sim_and_analyze_synth_data(
     do_iterative_cutoff_MC_calc=False,
     stepup=False,
     analysis_func: AnalysisFuncType=None,
-    fh_cutoff_normal_approx=False,
     fh_cutoff_imp_sample=True,
     fh_cutoff_imp_sample_prop:float=0.5,
     fh_cutoff_imp_sample_hedge:float=0.9,
@@ -1159,7 +1138,6 @@ def mc_sim_and_analyze_synth_data(
         do_iterative_cutoff_MC_calc=do_iterative_cutoff_MC_calc, # what is this?
         fin_par=fin_par,
         fh_sleep_time=fh_sleep_time,
-        fh_cutoff_normal_approx=fh_cutoff_normal_approx,
         fh_cutoff_imp_sample=fh_cutoff_imp_sample,
         fh_cutoff_imp_sample_prop=fh_cutoff_imp_sample_prop,
         fh_cutoff_imp_sample_hedge=fh_cutoff_imp_sample_hedge,
@@ -1169,7 +1147,7 @@ def mc_sim_and_analyze_synth_data(
 
     rejective = "B" in cutoff_df.columns
     # Confirm that it doesn't crash when generating the LLR
-    llr, obs = generate_llr_general(
+    llr, obs = generate_llr(
         params=params,
         n_periods=n_periods,
         rho=rho,
@@ -1196,169 +1174,167 @@ def mc_sim_and_analyze_synth_data(
     )
     return pd.DataFrame([analysis_func(msprtout, ground_truth) for msprtout in list_of_msprtout_objs])
     
-def single_sim_synth_data(
-    alpha=0.1,
-    beta=None,
-    cut_type="BL",
-    p0=0.05,
-    p1=0.045,
-    n_periods=None,
-    m_null=3,
-    m_alt=None,
-    max_magnitude=10.0,
-    m0_known=False,
-    scale_fdr=True,
-    rho=-0.5,
-    interleaved=False,
-    undershoot_prob=0.2,
-    fin_par=True,
-    hyp_type="drug",
-    fh_sleep_time=60,
-    do_iterative_cutoff_MC_calc=False,
-    stepup=False,
-    fh_cutoff_normal_approx=False,
-    fh_cutoff_imp_sample=True,
-    fh_cutoff_imp_sample_prop:float=0.5,
-    fh_cutoff_imp_sample_hedge:float=0.9,
-    load_data=None,
-    divide_cores=None,
-    split_corr=False,
-    rho1=None,
-    rand_order=False,
-    cummax=False,
-) -> multseq.MSPRTOut:
-    """Simulates and runs a single multseq test on synthetic data.
+# def single_sim_synth_data(
+#     alpha=0.1,
+#     beta=None,
+#     cut_type="BL",
+#     p0=0.05,
+#     p1=0.045,
+#     n_periods=None,
+#     m_null=3,
+#     m_alt=None,
+#     max_magnitude=10.0,
+#     m0_known=False,
+#     scale_fdr=True,
+#     rho=-0.5,
+#     interleaved=False,
+#     undershoot_prob=0.2,
+#     fin_par=True,
+#     hyp_type="drug",
+#     fh_sleep_time=60,
+#     do_iterative_cutoff_MC_calc=False,
+#     stepup=False,
+#     fh_cutoff_imp_sample=True,
+#     fh_cutoff_imp_sample_prop:float=0.5,
+#     fh_cutoff_imp_sample_hedge:float=0.9,
+#     load_data=None,
+#     divide_cores=None,
+#     split_corr=False,
+#     rho1=None,
+#     rand_order=False,
+#     cummax=False,
+# ) -> multseq.MSPRTOut:
+#     """Simulates and runs a single multseq test on synthetic data.
 
-    args:
-        alpha: (float)
-        beta: (float, optional) if set, indicates infinite horizon general
-            procedure. If None, use finite horizon rejective.
-        BH: (bool)
-        record_interval: (int)
-        p0: (float)
-        p1: (float)
-        n_periods: (int)
-        m_null: (int)
-        max_magnitude: (float)
-        sim_reps: (int) number of times to regenerate the data path for
-            establishing average FDP.
-        m0_known: (bool) if fdr-controlling scaling of the alpha cutoff vector
-            is to be performed, indicates whether to assume number of true
-            nulls is known.
-        scale_fdr: (bool) indicates whether or not to scale the alpha cutoffs
-            to control fdr under arbitrary joint distributions.
-        rho: (float) correlation coefficient for correlated statistics
-        interleaved: (bool) whether or not to interleave the true and false
-            null hypotheses
-        undershoot_prob: (float) probability of undershoot:
-                For finite horizon, effects the number of MC cutoff sims
-                For inifinte horizon, effects the artificial horizon
-    return:
-    """
-    # If the number of alternative hypotheses is not specified, assume it is equal to the number of null hypotheses.
-    if m_alt is None:
-        logging.info("m_alt not specified, assuming m_alt = m_null")
-        m_alt = m_null
-    m_total = m_null + m_alt
-    # Populate the dar, dnar, drr, and ground_truth data necessary for generating
-    # the synthetic observations.
-    if load_data is None:
-        if (hyp_type is None) or (hyp_type == "drug"):
-            dar, dnar, ground_truth = assemble_fake_drugs(
-                max_magnitude, m_null, interleaved, p0, p1
-            )
-            drr = dar + dnar
-        elif hyp_type == "binom":
-            dar, ground_truth = assemble_fake_binom(
-                m_null, interleaved, p0, p1, m_alt=m_alt
-            )
-            drr = pd.Series(ones(len(dar)), index=dar.index)
-            dnar = None
-        elif hyp_type == "pois":
-            dar, ground_truth = assemble_fake_pois(
-                m_null, interleaved, p0, p1, m_alt=m_alt
-            )
-            drr = pd.Series(ones(len(dar)), index=dar.index)
-            dnar = None
-        elif hyp_type == "gaussian":
-            dar, dnar, ground_truth = assemble_fake_gaussian(
-                max_magnitude, m_null, p0, p1, m_alt=m_alt
-            )
-            drr = dnar
-        elif hyp_type == "pois_grad":
-            dar = assemble_fake_pois_grad(m_null, p0, p1, m_alt=m_alt)
-            drr = pd.Series(ones(len(dar)), index=dar.index)
-            dnar = None
-            ground_truth = drr.astype(bool)
-            hyp_type = "pois"
-        else:
-            raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
-    else:
-        dar = load_data["dar"]
-        dnar = load_data["dnar"]
-        drr = load_data["drr"]
-        ground_truth = load_data["ground_truth"]
+#     args:
+#         alpha: (float)
+#         beta: (float, optional) if set, indicates infinite horizon general
+#             procedure. If None, use finite horizon rejective.
+#         BH: (bool)
+#         record_interval: (int)
+#         p0: (float)
+#         p1: (float)
+#         n_periods: (int)
+#         m_null: (int)
+#         max_magnitude: (float)
+#         sim_reps: (int) number of times to regenerate the data path for
+#             establishing average FDP.
+#         m0_known: (bool) if fdr-controlling scaling of the alpha cutoff vector
+#             is to be performed, indicates whether to assume number of true
+#             nulls is known.
+#         scale_fdr: (bool) indicates whether or not to scale the alpha cutoffs
+#             to control fdr under arbitrary joint distributions.
+#         rho: (float) correlation coefficient for correlated statistics
+#         interleaved: (bool) whether or not to interleave the true and false
+#             null hypotheses
+#         undershoot_prob: (float) probability of undershoot:
+#                 For finite horizon, effects the number of MC cutoff sims
+#                 For inifinte horizon, effects the artificial horizon
+#     return:
+#     """
+#     # If the number of alternative hypotheses is not specified, assume it is equal to the number of null hypotheses.
+#     if m_alt is None:
+#         logging.info("m_alt not specified, assuming m_alt = m_null")
+#         m_alt = m_null
+#     m_total = m_null + m_alt
+#     # Populate the dar, dnar, drr, and ground_truth data necessary for generating
+#     # the synthetic observations.
+#     if load_data is None:
+#         if (hyp_type is None) or (hyp_type == "drug"):
+#             dar, dnar, ground_truth = assemble_fake_drugs(
+#                 max_magnitude, m_null, interleaved, p0, p1
+#             )
+#             drr = dar + dnar
+#         elif hyp_type == "binom":
+#             dar, ground_truth = assemble_fake_binom(
+#                 m_null, interleaved, p0, p1, m_alt=m_alt
+#             )
+#             drr = pd.Series(ones(len(dar)), index=dar.index)
+#             dnar = None
+#         elif hyp_type == "pois":
+#             dar, ground_truth = assemble_fake_pois(
+#                 m_null, interleaved, p0, p1, m_alt=m_alt
+#             )
+#             drr = pd.Series(ones(len(dar)), index=dar.index)
+#             dnar = None
+#         elif hyp_type == "gaussian":
+#             dar, dnar, ground_truth = assemble_fake_gaussian(
+#                 max_magnitude, m_null, p0, p1, m_alt=m_alt
+#             )
+#             drr = dnar
+#         elif hyp_type == "pois_grad":
+#             dar = assemble_fake_pois_grad(m_null, p0, p1, m_alt=m_alt)
+#             drr = pd.Series(ones(len(dar)), index=dar.index)
+#             dnar = None
+#             ground_truth = drr.astype(bool)
+#             hyp_type = "pois"
+#         else:
+#             raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
+#     else:
+#         dar = load_data["dar"]
+#         dnar = load_data["dnar"]
+#         drr = load_data["drr"]
+#         ground_truth = load_data["ground_truth"]
 
-    # Calculate the LLR cutoffs and the number of simulation steps to run.
-    # If n
-    cutoff_df, n_periods = calc_sim_cutoffs(
-        drr,
-        alpha,
-        beta=beta,
-        scale_fdr=scale_fdr,
-        cut_type=cut_type,
-        p0=p0,
-        p1=p1,
-        stepup=stepup,
-        m0=m_null if m0_known else None,
-        m_total=m_total,
-        n_periods=n_periods,
-        undershoot_prob=undershoot_prob,
-        hyp_type=hyp_type,
-        do_iterative_cutoff_MC_calc=do_iterative_cutoff_MC_calc, # what is this?
-        fin_par=fin_par,
-        fh_sleep_time=fh_sleep_time,
-        fh_cutoff_normal_approx=fh_cutoff_normal_approx,
-        fh_cutoff_imp_sample=fh_cutoff_imp_sample,
-        fh_cutoff_imp_sample_prop=fh_cutoff_imp_sample_prop,
-        fh_cutoff_imp_sample_hedge=fh_cutoff_imp_sample_hedge,
-        divide_cores=divide_cores,
-    )
-    # TODO: add options for scaling style
+#     # Calculate the LLR cutoffs and the number of simulation steps to run.
+#     # If n
+#     cutoff_df, n_periods = calc_sim_cutoffs(
+#         drr,
+#         alpha,
+#         beta=beta,
+#         scale_fdr=scale_fdr,
+#         cut_type=cut_type,
+#         p0=p0,
+#         p1=p1,
+#         stepup=stepup,
+#         m0=m_null if m0_known else None,
+#         m_total=m_total,
+#         n_periods=n_periods,
+#         undershoot_prob=undershoot_prob,
+#         hyp_type=hyp_type,
+#         do_iterative_cutoff_MC_calc=do_iterative_cutoff_MC_calc, # what is this?
+#         fin_par=fin_par,
+#         fh_sleep_time=fh_sleep_time,
+#         fh_cutoff_imp_sample=fh_cutoff_imp_sample,
+#         fh_cutoff_imp_sample_prop=fh_cutoff_imp_sample_prop,
+#         fh_cutoff_imp_sample_hedge=fh_cutoff_imp_sample_hedge,
+#         divide_cores=divide_cores,
+#     )
+#     # TODO: add options for scaling style
 
-    rejective = "B" in cutoff_df.columns
-    # TODO: WTF is going on here???
-    # Generate data
-    if split_corr:
-        m1 = m_alt
-        # rho1 = rho1
-    else:
-        m1 = None
-        rho1 = None
-    print("rho1", rho1)
-    # Confirm that it doesn't crash when generating the LLR
-    llr = generate_llr(
-        dar,
-        dnar,
-        n_periods,
-        rho,
-        hyp_type,
-        p0,
-        p1,
-        m1,
-        rho1,
-        rand_order=rand_order,
-        cummax=cummax,
-    )
-    tout = multseq.msprt(
-        statistics=llr,
-        cutoffs=cutoff_df,
-        record_interval=100,
-        stepup=stepup,
-        rejective=True,
-    )
-    tout.full_llr = llr
-    return tout
+#     rejective = "B" in cutoff_df.columns
+#     # TODO: WTF is going on here???
+#     # Generate data
+#     if split_corr:
+#         m1 = m_alt
+#         # rho1 = rho1
+#     else:
+#         m1 = None
+#         rho1 = None
+#     print("rho1", rho1)
+#     # Confirm that it doesn't crash when generating the LLR
+#     llr = generate_llr(
+#         dar,
+#         dnar,
+#         n_periods,
+#         rho,
+#         hyp_type,
+#         p0,
+#         p1,
+#         m1,
+#         rho1,
+#         rand_order=rand_order,
+#         cummax=cummax,
+#     )
+#     tout = multseq.msprt(
+#         statistics=llr,
+#         cutoffs=cutoff_df,
+#         record_interval=100,
+#         stepup=stepup,
+#         rejective=True,
+#     )
+#     tout.full_llr = llr
+#     return tout
 
 def compute_fdp(
     tout: multseq.MSPRTOut, ground_truth: pd.Series

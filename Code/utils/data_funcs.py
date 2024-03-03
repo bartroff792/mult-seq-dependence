@@ -273,234 +273,234 @@ def build_interleaved_ground_truth(m_null: int, m_alt: int) -> list[bool]:
 
 
 
-def assemble_fake_drugs_general(
-    max_magnitude: float,
-    m_null: int,
-    interleaved: bool,
-    theta0: float,
-    theta1: float,
-    extra_params: Dict[str, pd.Series],
-    m_alt: Optional[int] = None,
-) -> Tuple[Dict[str,pd.Series], pd.Series]:
-    dar, dnar, ground_truth = assemble_fake_drugs(
-        extra_params["max_magnitude"], m_null, interleaved, theta0, theta1, m_alt
-    )
-    return {"dar": dar, "dnar": dnar}, ground_truth
+# def assemble_fake_drugs_general(
+#     max_magnitude: float,
+#     m_null: int,
+#     interleaved: bool,
+#     theta0: float,
+#     theta1: float,
+#     extra_params: Dict[str, pd.Series],
+#     m_alt: Optional[int] = None,
+# ) -> Tuple[Dict[str,pd.Series], pd.Series]:
+#     dar, dnar, ground_truth = assemble_fake_drugs(
+#         extra_params["max_magnitude"], m_null, interleaved, theta0, theta1, m_alt
+#     )
+#     return {"dar": dar, "dnar": dnar}, ground_truth
 
 
-def assemble_fake_drugs(
-    max_magnitude: float,
-    m_null: int,
-    interleaved: bool,
-    p0: float,
-    p1: float,
-    m_alt: Optional[int] = None,
-) -> Tuple[pd.Series, pd.Series, pd.Series]:
-    """Assembles dar and dnar for fake drugs.
+# def assemble_fake_drugs(
+#     max_magnitude: float,
+#     m_null: int,
+#     interleaved: bool,
+#     p0: float,
+#     p1: float,
+#     m_alt: Optional[int] = None,
+# ) -> Tuple[pd.Series, pd.Series, pd.Series]:
+#     """Assembles dar and dnar for fake drugs.
 
-    Note: when m_alt is specified, the magnitudes will be messily interleaved.
+#     Note: when m_alt is specified, the magnitudes will be messily interleaved.
 
-    Args:
-        max_magnitude (float): maximum magnitude of amnesia and non-amnesia rates.
-        m_null (int): number of true nulls.
-        interleaved (bool): whether to interleave null and alternative hypotheses.
-        p0 (float): null amnesia rate.
-        p1 (float): alternative amnesia rate.
-        m_alt (Optional[int], optional): number of true alternatives. Defaults to None,
+#     Args:
+#         max_magnitude (float): maximum magnitude of amnesia and non-amnesia rates.
+#         m_null (int): number of true nulls.
+#         interleaved (bool): whether to interleave null and alternative hypotheses.
+#         p0 (float): null amnesia rate.
+#         p1 (float): alternative amnesia rate.
+#         m_alt (Optional[int], optional): number of true alternatives. Defaults to None,
 
-    Returns:
-        (pd.Series, pd.Series, pd.Series): tuple of amnesia rate series, non-amnesia
-            rate series, and ground truth series.
-    """
-    mag_vec = np.linspace(1, max_magnitude, m_null)
+#     Returns:
+#         (pd.Series, pd.Series, pd.Series): tuple of amnesia rate series, non-amnesia
+#             rate series, and ground truth series.
+#     """
+#     mag_vec = np.linspace(1, max_magnitude, m_null)
 
-    drug_names = gen_names(2 * m_null)
+#     drug_names = gen_names(2 * m_null)
 
-    # Create null/alternative masks, and total magnitude series
-    if interleaved:
-        if m_alt is None:
-            ground_truth = pd.Series(
-                np.tile(np.array([True, False]), m_null), index=drug_names
-            )
-            drr = pd.Series(np.repeat(mag_vec, 2), index=drug_names)
-        else:
-            ground_truth = pd.Series(
-                build_interleaved_ground_truth(m_null, m_alt), index=drug_names
-            )
-            drr = pd.Series(np.tile(mag_vec, 2), index=drug_names)
-    else:
-        if m_alt is None:
-            ground_truth = pd.Series(
-                np.repeat(np.array([True, False]), m_null), index=drug_names
-            )
-            drr = pd.Series(np.repeat(mag_vec, 2), index=drug_names)
-        else:
-            ground_truth = pd.Series(
-                np.repeat(np.array([True, False]), [m_null, m_alt]), index=drug_names
-            )
-            drr = pd.Series(np.tile(mag_vec, 2), index=drug_names)
+#     # Create null/alternative masks, and total magnitude series
+#     if interleaved:
+#         if m_alt is None:
+#             ground_truth = pd.Series(
+#                 np.tile(np.array([True, False]), m_null), index=drug_names
+#             )
+#             drr = pd.Series(np.repeat(mag_vec, 2), index=drug_names)
+#         else:
+#             ground_truth = pd.Series(
+#                 build_interleaved_ground_truth(m_null, m_alt), index=drug_names
+#             )
+#             drr = pd.Series(np.tile(mag_vec, 2), index=drug_names)
+#     else:
+#         if m_alt is None:
+#             ground_truth = pd.Series(
+#                 np.repeat(np.array([True, False]), m_null), index=drug_names
+#             )
+#             drr = pd.Series(np.repeat(mag_vec, 2), index=drug_names)
+#         else:
+#             ground_truth = pd.Series(
+#                 np.repeat(np.array([True, False]), [m_null, m_alt]), index=drug_names
+#             )
+#             drr = pd.Series(np.tile(mag_vec, 2), index=drug_names)
 
-    # Create (non) amensia magnitude
-    dar = (p0 * ground_truth + p1 * ~ground_truth) * drr
-    dnar = drr - dar
-    return dar, dnar, ground_truth
-
-
-def assemble_fake_gaussian_general(m_null, p0, p1, extra_params, m_alt=None):
-    raise NotImplementedError("Gaussian LLR not implemented yet.")
-    dar, dnar, ground_truth = assemble_fake_gaussian(
-        extra_params["max_magnitude"], m_null, p0, p1, m_alt
-    )
-    return {"dar": dar, "dnar": dnar}, ground_truth
-
-def assemble_fake_gaussian(max_magnitude, m_null, p0, p1, m_alt=None):
-    """Assembles dar and dnar for fake gaussian."""
-    var_vec_true = np.linspace(1, max_magnitude, m_null)
-    var_vec_false = np.linspace(1, max_magnitude, m_alt)
-
-    drug_names = gen_names(m_null + m_alt)
-
-    # Create null/alternative masks, and total magnitude series
-    if m_alt is None:
-        ground_truth = pd.Series(
-            np.repeat(np.array([True, False]), m_null), index=drug_names
-        )
-    else:
-        ground_truth = pd.Series(
-            np.repeat(np.array([True, False]), [m_null, m_alt]), index=drug_names
-        )
-    mean_vec = p0 * ground_truth + p1 * ~ground_truth
-    sd_vec = pd.Series(
-        np.sqrt(numpy.concatenate((var_vec_true, var_vec_false))), index=mean_vec.index
-    )
-
-    return mean_vec, sd_vec, ground_truth
+#     # Create (non) amensia magnitude
+#     dar = (p0 * ground_truth + p1 * ~ground_truth) * drr
+#     dnar = drr - dar
+#     return dar, dnar, ground_truth
 
 
-def assemble_fake_binom_general(
-        m_null:int,interleaved:bool, 
-        theta0:float, theta1:float, 
-        extra_params: Dict[str, Union[float, pd.Series]], m_alt: Optional[int]=None)-> Tuple[Dict[str, pd.Series], pd.Series]:
-    binom_probs, n_events, ground_truth = assemble_fake_binom(
-        m_null, interleaved, theta0, theta1, m_alt, n_events=extra_params["n_events"],
-    )
-    return {"binom_probs": binom_probs, "n_events": n_events}, ground_truth
+# def assemble_fake_gaussian_general(m_null, p0, p1, extra_params, m_alt=None):
+#     raise NotImplementedError("Gaussian LLR not implemented yet.")
+#     dar, dnar, ground_truth = assemble_fake_gaussian(
+#         extra_params["max_magnitude"], m_null, p0, p1, m_alt
+#     )
+#     return {"dar": dar, "dnar": dnar}, ground_truth
 
-def assemble_fake_binom(
-    m_null: int, interleaved: bool, p0: float, p1: float, m_alt: Optional[int] = None, n_events: int = 1,
-) -> Tuple[pd.Series, pd.Series]:
-    """Assembles dar and dnar for fake drugs."""
-    if m_alt is None:
-        drug_names = gen_names(2 * m_null)
-    else:
-        drug_names = gen_names(m_null + m_alt)
-    # Create null/alternative masks, and total magnitude series
-    if interleaved:
-        if m_alt is None:
-            ground_truth = pd.Series(
-                np.tile(np.array([True, False]), m_null), index=drug_names
-            )
-        else:
-            ground_truth = pd.Series(
-                build_interleaved_ground_truth(m_null, m_alt), index=drug_names
-            )
+# def assemble_fake_gaussian(max_magnitude, m_null, p0, p1, m_alt=None):
+#     """Assembles dar and dnar for fake gaussian."""
+#     var_vec_true = np.linspace(1, max_magnitude, m_null)
+#     var_vec_false = np.linspace(1, max_magnitude, m_alt)
 
-    else:
-        if m_alt is None:
-            ground_truth = pd.Series(
-                np.repeat(np.array([True, False]), m_null), index=drug_names
-            )
-        else:
-            ground_truth = pd.Series(
-                np.repeat(np.array([True, False]), [m_null, m_alt]), index=drug_names
-            )
+#     drug_names = gen_names(m_null + m_alt)
 
-    # Create (non) amensia magnitude
-    binom_probs = p0 * ground_truth + p1 * ~ground_truth
-    n_events = np.repeat(n_events, len(binom_probs))
-    return binom_probs, n_events, ground_truth
+#     # Create null/alternative masks, and total magnitude series
+#     if m_alt is None:
+#         ground_truth = pd.Series(
+#             np.repeat(np.array([True, False]), m_null), index=drug_names
+#         )
+#     else:
+#         ground_truth = pd.Series(
+#             np.repeat(np.array([True, False]), [m_null, m_alt]), index=drug_names
+#         )
+#     mean_vec = p0 * ground_truth + p1 * ~ground_truth
+#     sd_vec = pd.Series(
+#         np.sqrt(numpy.concatenate((var_vec_true, var_vec_false))), index=mean_vec.index
+#     )
+
+#     return mean_vec, sd_vec, ground_truth
 
 
+# def assemble_fake_binom_general(
+#         m_null:int,interleaved:bool, 
+#         theta0:float, theta1:float, 
+#         extra_params: Dict[str, Union[float, pd.Series]], m_alt: Optional[int]=None)-> Tuple[Dict[str, pd.Series], pd.Series]:
+#     binom_probs, n_events, ground_truth = assemble_fake_binom(
+#         m_null, interleaved, theta0, theta1, m_alt, n_events=extra_params["n_events"],
+#     )
+#     return {"binom_probs": binom_probs, "n_events": n_events}, ground_truth
+
+# def assemble_fake_binom(
+#     m_null: int, interleaved: bool, p0: float, p1: float, m_alt: Optional[int] = None, n_events: int = 1,
+# ) -> Tuple[pd.Series, pd.Series]:
+#     """Assembles dar and dnar for fake drugs."""
+#     if m_alt is None:
+#         drug_names = gen_names(2 * m_null)
+#     else:
+#         drug_names = gen_names(m_null + m_alt)
+#     # Create null/alternative masks, and total magnitude series
+#     if interleaved:
+#         if m_alt is None:
+#             ground_truth = pd.Series(
+#                 np.tile(np.array([True, False]), m_null), index=drug_names
+#             )
+#         else:
+#             ground_truth = pd.Series(
+#                 build_interleaved_ground_truth(m_null, m_alt), index=drug_names
+#             )
+
+#     else:
+#         if m_alt is None:
+#             ground_truth = pd.Series(
+#                 np.repeat(np.array([True, False]), m_null), index=drug_names
+#             )
+#         else:
+#             ground_truth = pd.Series(
+#                 np.repeat(np.array([True, False]), [m_null, m_alt]), index=drug_names
+#             )
+
+#     # Create (non) amensia magnitude
+#     binom_probs = p0 * ground_truth + p1 * ~ground_truth
+#     n_events = np.repeat(n_events, len(binom_probs))
+#     return binom_probs, n_events, ground_truth
 
 
-def assemble_fake_pois_general(
-    m_null: int,
-    interleaved: bool,
-    theta0: float,
-    theta1: float,
-    m_alt: Optional[int] = None,
-    extra_params: Dict[str, Union[float, pd.Series]] = None,
-) -> Tuple[Dict[str, pd.Series], pd.Series]:
-    pois_rate, ground_truth = assemble_fake_pois(
-        m_null, interleaved, theta0, theta1, m_alt
-    )
-    return {"pois_rate": pois_rate}, ground_truth
-
-def assemble_fake_pois(
-    m_null: int,
-    interleaved: bool,
-    p0: float,
-    p1: float,
-    m_alt: Optional[int] = None,
-) -> Tuple[pd.Series, pd.Series]:
-    """Assembles dar and dnar for fake drugs.
-
-    Args:
-        m_null (int): number of true nulls.
-        interleaved (bool): whether to interleave null and alternative hypotheses.
-        p0 (float): null poisson rate.
-        p1 (float): alternative poisson rate.
-        m_alt (Optional[int], optional): number of true alternatives. Defaults to None,
-            which means m_alt = m_null.
-
-    Returns:
-        (pd.Series, pd.Series): tuple of poisson rate series and ground truth series.
-    """
-    if m_alt is None:
-        drug_names = gen_names(2 * m_null)
-    else:
-        drug_names = gen_names(m_null + m_alt)
-
-    # Create null/alternative masks, and total magnitude series
-    if interleaved:
-        if m_alt is None:
-            ground_truth = pd.Series(
-                np.tile(np.array([True, False]), m_null), index=drug_names
-            )
-        else:
-            ground_truth = pd.Series(
-                build_interleaved_ground_truth(m_null, m_alt), index=drug_names
-            )
-    else:
-        if m_alt is None:
-            ground_truth = pd.Series(
-                np.repeat(np.array([True, False]), m_null), index=drug_names
-            )
-        else:
-            ground_truth = pd.Series(
-                np.repeat(np.array([True, False]), [m_null, m_alt]), index=drug_names
-            )
-    # Create (non) amensia magnitude
-    dar = p0 * ground_truth + p1 * ~ground_truth
-    return dar, ground_truth
 
 
-def assemble_fake_pois_grad(m_null, p0, p1, m_alt=None):
-    """Assembles dar and dnar for fake drugs."""
-    if m_alt is None:
-        m_alt = m_null
-    lam0 = min((p0, p1))
-    lam1 = max((p0, p1))
-    lam_ratio = lam0 / lam1
-    log_low_lam = np.log(lam0) + np.log(lam_ratio)
-    log_high_lam = np.log(lam1) - np.log(lam_ratio)
-    dar_vals = np.exp(np.linspace(log_low_lam, log_high_lam, m_null + m_alt))
-    drug_names = gen_names(m_null + m_alt)
-    #    drug_names = list(map(lambda u,v: u + v,
-    #                     np.array(list(string.ascii_letters))[np.arange(0, 4 * m_null, 2)],
-    #                     np.array(list(string.ascii_letters))[np.arange(1, 4 * m_null, 2)]))
+# def assemble_fake_pois_general(
+#     m_null: int,
+#     interleaved: bool,
+#     theta0: float,
+#     theta1: float,
+#     m_alt: Optional[int] = None,
+#     extra_params: Dict[str, Union[float, pd.Series]] = None,
+# ) -> Tuple[Dict[str, pd.Series], pd.Series]:
+#     pois_rate, ground_truth = assemble_fake_pois(
+#         m_null, interleaved, theta0, theta1, m_alt
+#     )
+#     return {"pois_rate": pois_rate}, ground_truth
 
-    return pd.Series(dar_vals, index=drug_names)
+# def assemble_fake_pois(
+#     m_null: int,
+#     interleaved: bool,
+#     p0: float,
+#     p1: float,
+#     m_alt: Optional[int] = None,
+# ) -> Tuple[pd.Series, pd.Series]:
+#     """Assembles dar and dnar for fake drugs.
+
+#     Args:
+#         m_null (int): number of true nulls.
+#         interleaved (bool): whether to interleave null and alternative hypotheses.
+#         p0 (float): null poisson rate.
+#         p1 (float): alternative poisson rate.
+#         m_alt (Optional[int], optional): number of true alternatives. Defaults to None,
+#             which means m_alt = m_null.
+
+#     Returns:
+#         (pd.Series, pd.Series): tuple of poisson rate series and ground truth series.
+#     """
+#     if m_alt is None:
+#         drug_names = gen_names(2 * m_null)
+#     else:
+#         drug_names = gen_names(m_null + m_alt)
+
+#     # Create null/alternative masks, and total magnitude series
+#     if interleaved:
+#         if m_alt is None:
+#             ground_truth = pd.Series(
+#                 np.tile(np.array([True, False]), m_null), index=drug_names
+#             )
+#         else:
+#             ground_truth = pd.Series(
+#                 build_interleaved_ground_truth(m_null, m_alt), index=drug_names
+#             )
+#     else:
+#         if m_alt is None:
+#             ground_truth = pd.Series(
+#                 np.repeat(np.array([True, False]), m_null), index=drug_names
+#             )
+#         else:
+#             ground_truth = pd.Series(
+#                 np.repeat(np.array([True, False]), [m_null, m_alt]), index=drug_names
+#             )
+#     # Create (non) amensia magnitude
+#     dar = p0 * ground_truth + p1 * ~ground_truth
+#     return dar, ground_truth
+
+
+# def assemble_fake_pois_grad(m_null, p0, p1, m_alt=None):
+#     """Assembles dar and dnar for fake drugs."""
+#     if m_alt is None:
+#         m_alt = m_null
+#     lam0 = min((p0, p1))
+#     lam1 = max((p0, p1))
+#     lam_ratio = lam0 / lam1
+#     log_low_lam = np.log(lam0) + np.log(lam_ratio)
+#     log_high_lam = np.log(lam1) - np.log(lam_ratio)
+#     dar_vals = np.exp(np.linspace(log_low_lam, log_high_lam, m_null + m_alt))
+#     drug_names = gen_names(m_null + m_alt)
+#     #    drug_names = list(map(lambda u,v: u + v,
+#     #                     np.array(list(string.ascii_letters))[np.arange(0, 4 * m_null, 2)],
+#     #                     np.array(list(string.ascii_letters))[np.arange(1, 4 * m_null, 2)]))
+
+#     return pd.Series(dar_vals, index=drug_names)
 
 
 def simulate_reactions(
@@ -845,7 +845,7 @@ def compute_llr(
     assert llr.shape==observed_data.shape, f"LLR and observed data shapes do not match: {llr.shape} and {observed_data.shape}."
     return llr
 
-def generate_llr_general(
+def generate_llr(
     params: Dict[str, pd.Series],
     n_periods: int,
     rho: Optional[float],
@@ -1217,7 +1217,7 @@ class infinite_dgp_wrapper(df_dgp_wrapper):
 
     def __init__(self, gen_llr_kwargs, drop_old_data=True):
         self._gen_kwargs = gen_llr_kwargs
-        self._llr_df, self._obs_df = generate_llr_general(**gen_llr_kwargs)
+        self._llr_df, self._obs_df = generate_llr(**gen_llr_kwargs)
         assert self._llr_df.shape==self._obs_df.shape, "LLR and observed data must have the same shape."
         self._iter_rows = self._llr_df.iterrows()
         self._drop_old_data = drop_old_data
@@ -1227,7 +1227,7 @@ class infinite_dgp_wrapper(df_dgp_wrapper):
             _, data_ser = next(self._iter_rows)
         except StopIteration as ex:
             last_val = self._llr_df.iloc[-1]
-            new_df = generate_llr_general(**self._gen_kwargs) + last_val
+            new_df = generate_llr(**self._gen_kwargs) + last_val
             if self._drop_old_data:
                 self._llr_df = new_df
             else:
