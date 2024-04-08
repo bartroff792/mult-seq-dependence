@@ -396,23 +396,65 @@ def simple_toeplitz_corr_mat(
     else:
         return raw_corr_mat
 
+@dataclass
+class CorrelationContainer:
+    rho: pd.Series # maps group numbers to correlation coefficients
+    group_ser: pd.Series # maps hypothesis names to group numbers
+
+def copula_draw(
+    hyp_idx: pd.Index,
+    n_periods: int, 
+    rho: Union[float, CorrelationContainer], 
+    rand_order: bool = False,
+) -> pd.DataFrame:
+    """Draws from a gaussian copula with a given correlation matrix.
+
+    Args:
+        hyp_idx (pd.Index): index of hypothesis names.
+        n_periods (int): number of periods to simulate.
+        rho (Union[float, CorrelationContainer]): correlation coefficient. If a float, the correlation
+            matrix will be a simple toeplitz matrix with this value. If a CorrelationContainer, the
+            correlation matrix will be block diagonal with each block having the same correlation
+            coefficient. The blocks are defined by the group_ser attribute of the CorrelationContainer.
+        rand_order (bool, optional): whether to randomly order the drugs. Defaults to False.
+
+    Returns:
+        pd.DataFrame: draws from a multivariate normal with the specified correlation matrix.
+    """
+    if isinstance(rho, float):
+        cov_mat = simple_toeplitz_corr_mat(rho, len(hyp_idx), rand_order)
+        unif_draw = pd.DataFrame(
+            stats.norm.cdf(stats.multivariate_normal(cov=cov_mat).rvs(size=n_periods)),
+            columns=hyp_idx,
+        )
+    elif isinstance(rho, CorrelationContainer):
+        unif_draw_list = []
+        for group_number, rho_val in rho.rho.items():
+            group_hyps = rho.group_ser[rho.group_ser==group_number].index
+            group_size = len(group_hyps)
+            cov_mat = simple_toeplitz_corr_mat(rho_val, group_size, rand_order)
+            group_unif_draw = pd.DataFrame(
+                stats.norm.cdf(stats.multivariate_normal(cov=cov_mat).rvs(size=n_periods)),
+                columns=group_hyps,
+            )
+            unif_draw_list.append(group_unif_draw)
+        unif_draw = pd.concat(unif_draw_list, axis=1)
+    else:
+        raise ValueError("Unrecognized correlation type: {0}".format(rho))
+    unif_draw.index.name = "period"
+    return unif_draw
 
 def simulate_correlated_observations(
     params: Dict[str, pd.Series],
     n_periods: int,
-    rho: float,
-    hyp_type: Literal["binom", "pois"],
+    rho: Union[float, CorrelationContainer],
+    hyp_type: Literal["binom", "pois", "drug"],
     rand_order: bool = False,
 ) -> Dict[str, pd.DataFrame]:
-
+    # Get full index of hypothesis names
     hyp_idx = check_params(hyp_type, params)
-    cov_mat = simple_toeplitz_corr_mat(rho, len(hyp_idx), rand_order)
-    unif_draw = pd.DataFrame(
-        stats.norm.cdf(stats.multivariate_normal(cov=cov_mat).rvs(size=n_periods)),
-        columns=hyp_idx,
-    )
-    unif_draw.index.name = "period"
-
+    # Draw from the copula.
+    unif_draw = copula_draw(hyp_idx, n_periods, rho, rand_order)
     if hyp_type == "binom":
         dist = stats.binom(**params)
         obs = {
@@ -429,19 +471,17 @@ def simulate_correlated_observations(
         }
     elif hyp_type == "drug":
         total_rate_dist = stats.poisson(params["mu"])
+        # Copula draw for the rates
+        rate_unif_draw = copula_draw(hyp_idx, n_periods, rho, rand_order)
         total_obs = pd.DataFrame(
-            total_rate_dist.ppf(unif_draw), columns=hyp_idx, index=unif_draw.index
+            total_rate_dist.ppf(rate_unif_draw), columns=hyp_idx, index=unif_draw.index
         )
-        prop_unif_draw = pd.DataFrame(
-            stats.norm.cdf(stats.multivariate_normal(cov=cov_mat).rvs(size=n_periods)),
-            columns=hyp_idx,
-            index=unif_draw.index,
-        )
+        # Use the main copula draws for the proportion of relevant events
         relevant_events_dist = stats.binom(total_obs.astype(int), params["p"])
         relevant_events_counts = pd.DataFrame(
-            relevant_events_dist.ppf(prop_unif_draw),
+            relevant_events_dist.ppf(unif_draw),
             columns=hyp_idx,
-            index=prop_unif_draw.index,
+            index=unif_draw.index,
         )
         non_relevant_events_counts = total_obs - relevant_events_counts
         obs = {
@@ -763,14 +803,16 @@ class infinite_dgp_wrapper(df_dgp_wrapper):
         try:
             _, data_ser = next(self._iter_rows)
         except StopIteration as ex:
-            last_val = self._llr_df.iloc[-1]
-            new_df = generate_llr(**self._gen_kwargs) + last_val
+            # TODO: This seems sketchy... what's happening here
+            final_llr_row = self._llr_df.iloc[-1]
+            llr_df, obs_data_dict = generate_llr(**self._gen_kwargs)
+            llr_df = llr_df + final_llr_row
             if self._drop_old_data:
-                self._llr_df = new_df
+                self._llr_df = llr_df
             else:
-                self._llr_df = pd.concat((self._llr_df, new_df))
+                self._llr_df = pd.concat((self._llr_df, llr_df))
                 self._llr_df.reset_index(inplace=True, drop=True)
-            self._iter_rows = new_df.iterrows()
+            self._iter_rows = llr_df.iterrows()
             _, data_ser = next(self._iter_rows)
         return data_ser[col_list]
 

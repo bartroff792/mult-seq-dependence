@@ -51,6 +51,10 @@ ACCEPTABLE_CONFIG_KEYS = [
     "hyp_type",
     "sim_reps",
     "reps_per_task",
+    "error_control",
+    "n_periods",
+    "rho",
+    "extra_params",
 ]
     
 def validate_config(config):
@@ -60,8 +64,9 @@ def validate_config(config):
     Args:
         config: dictionary of key-value pairs to pass as arguments to the job
     """
-    if set(config.keys()) != set(ACCEPTABLE_CONFIG_KEYS):
-        raise ValueError(f"Invalid keys in config: {set(config.keys()).symmetric_difference(ACCEPTABLE_CONFIG_KEYS)}")
+    unknown_keys = set(config.keys()).difference(ACCEPTABLE_CONFIG_KEYS)
+    if  unknown_keys:
+        raise ValueError(f"Invalid keys in config: {unknown_keys}")
     
 # async def launch_job(project_id, region, job_name, config, run_name=None):
 def launch_job(project_id, region, job_name, config, run_name=None):

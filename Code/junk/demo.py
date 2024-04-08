@@ -15,7 +15,7 @@ import string
 from tqdm import tqdm
 from utils import cutoff_funcs
 from utils.cutoff_funcs import (finite_horizon_rejective_cutoffs, 
-                                apply_fdr_controlled_alpha, guo_rao_stepdown_fdr_level)
+                                apply_fdr_control_to_alpha_vec, guo_rao_stepdown_fdr_level)
 from utils.data_funcs import (read_drug_data, simulate_reactions, assemble_llr, 
                               simulate_correlated_reactions_full_sig, 
                               assemble_fake_drugs)
@@ -218,7 +218,7 @@ def finite_horizon_seq_stepdown_plot(alpha=.1, n_periods=1000,BH=True, record_in
     else:        
         alpha_vec_raw = alpha / (float(N_drugs) - arange(N_drugs))
     if do_scale:
-        scaled_alpha_vec = apply_fdr_controlled_alpha(alpha, alpha_vec_raw)
+        scaled_alpha_vec = apply_fdr_control_to_alpha_vec(alpha, alpha_vec_raw)
     else:
         scaled_alpha_vec = alpha_vec_raw
 

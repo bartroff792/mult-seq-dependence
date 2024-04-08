@@ -37,7 +37,7 @@ from multseq import step_down_elimination
 from utils.data_funcs import (assemble_fake_drugs, simulate_correlated_reactions_full_sig, assemble_llr,
                               assemble_fake_binom, simulate_correlated_binom_full_sig, assemble_binom_llr,
                               assemble_fake_pois, simulate_correlated_pois_full_sig, assemble_pois_llr)
-from utils.cutoff_funcs import (apply_fdr_controlled_alpha, llr_term_moments, llr_binom_term_moments, 
+from utils.cutoff_funcs import (apply_fdr_control_to_alpha_vec, llr_term_moments, llr_binom_term_moments, 
                                 llr_pois_term_moments)
 from utils import data_funcs
 from scipy.stats import norm as normal_var
@@ -105,7 +105,7 @@ def get_oc_range(p0, p1,
 
     alpha_vec_raw = alpha * arange(1, 1+N_drugs) / float(N_drugs)
     if scale_alpha:
-        scaled_alpha_vec = apply_fdr_controlled_alpha(alpha, alpha_vec_raw)
+        scaled_alpha_vec = apply_fdr_control_to_alpha_vec(alpha, alpha_vec_raw)
     else:
         scaled_alpha_vec = alpha_vec_raw
     

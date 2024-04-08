@@ -262,6 +262,39 @@ class TestSimulateCorrelatedObservations:
             assert obs_df.dtypes.iloc[2] == np.float64
             assert obs_df.min().min() >= 0
 
+    def test_copula_draw_contstant(self):
+        n_periods = 1000
+        hyp_idx = pd.Index(["a", "b", "c"], name="hyp_name")
+        rho = 0.3
+        np.random.seed(42)
+        unif_draw = data_funcs.copula_draw(hyp_idx=hyp_idx,
+                               n_periods=n_periods,
+                               rho=rho,
+                               rand_order=False)
+        cov_mat = unif_draw.cov()
+        assert cov_mat.shape == (3, 3)
+        assert cov_mat.loc["a", "b"] > cov_mat.loc["a", "c"]
+
+    
+    def test_copula_draw_block_diag(self):
+        n_periods = 1000
+        hyp_idx = pd.Index(["a", "b", "c", "d"], name="hyp_name")
+        rho = data_funcs.CorrelationContainer(
+            rho=pd.Series([-0.98, 0.98], index=[0,1]),
+            group_ser=pd.Series([1, 0, 0, 1], index=hyp_idx)
+        )
+
+        np.random.seed(42)
+        unif_draw = data_funcs.copula_draw(hyp_idx=hyp_idx,
+                               n_periods=n_periods,
+                               rho=rho,
+                               rand_order=False)
+        assert unif_draw.shape == (1000, 4)
+        cov_mat = unif_draw.corr()
+        TOL = 0.1
+        assert cov_mat.loc["a", "d"] >  1.0 - TOL
+        assert np.abs(cov_mat.loc["a", "c"]) < TOL
+        assert cov_mat.loc["b", "c"] < -1 + TOL
 
 class TestGeneralLLR:
     def test_binom(self):

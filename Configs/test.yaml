@@ -1,4 +1,4 @@
-test: 
+testpfdr: 
   alpha: 0.25
   beta: 0.1
   cut_type: BL
@@ -9,3 +9,16 @@ test:
   hyp_type: pois
   sim_reps: 700
   reps_per_task: 100
+  error_control: pfdr
+test_fh_fdr: 
+  alpha: 0.25
+  cut_type: BL
+  theta0: 0.05
+  theta1: 0.04
+  m_null: 3
+  m_alt: 7
+  hyp_type: pois
+  sim_reps: 700
+  reps_per_task: 100
+  error_control: fdr
+  n_periods: 100

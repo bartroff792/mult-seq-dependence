@@ -17,16 +17,55 @@ import copy
 
 # Imports the Cloud Logging client library
 import google.cloud.logging
+try:
+    # Instantiates a client
+    client = google.cloud.logging.Client()
 
-# Instantiates a client
-client = google.cloud.logging.Client()
+    # Retrieves a Cloud Logging handler based on the environment
+    # you're running in and integrates the handler with the
+    # Python logging module. By default this captures all logs
+    # at INFO level and higher
+    client.setup_logging()
+except Exception as ex:
+    print(f"Error setting up cloud logging: {ex}")
+    pass
 
-# Retrieves a Cloud Logging handler based on the environment
-# you're running in and integrates the handler with the
-# Python logging module. By default this captures all logs
-# at INFO level and higher
-client.setup_logging()
 import logging
+
+
+class ParseKwargs(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, dict())
+        for value in values:
+            key, value = value.split('=')
+            getattr(namespace, self.dest)[key] = value
+            
+parser = argparse.ArgumentParser(
+    description="Run a simulation and store the results in a database."
+)
+# Add arguments for each of the configuration options your simulation requires
+parser.add_argument("--alpha", type=float, help="FDR level")
+parser.add_argument("--beta", type=float, help="Optional FNR level")
+parser.add_argument("--cut_type", type=str, help="Type of cut")
+parser.add_argument("--theta0", type=float, help="Null hypothesis parameter value.")
+parser.add_argument("--theta1", type=float, help="Alternative hypothesis parameter value.")
+parser.add_argument("--rho", type=float, help="Correlation between hypotheses")
+parser.add_argument("--extra_params", nargs='*', action=ParseKwargs, help="other generating parameters")
+parser.add_argument("--n_periods", type=int, help="Number of periods")
+parser.add_argument("--m_null", type=int, help="Number of null hypotheses")
+parser.add_argument("--m_alt", type=int, help="Number of alternative hypotheses")
+parser.add_argument("--hyp_type", type=str, help="Type of hypothesis")
+parser.add_argument("--sim_reps", type=int, help="Number of simulation repetitions")
+parser.add_argument("--error_control", type=str, help="Error control method. 'pfdr', 'fdr' or don't pass anything. If nothing is passed, will use unscaled BL cutoffs.")
+# Metadata/launch specific
+parser.add_argument("--cloud", action="store_true", help="Run in cloud mode")
+parser.add_argument("--seed", type=int, help="Random seed for reproducibility")
+parser.add_argument("--host", type=str, help="Database host", default=3306)
+parser.add_argument("--port", type=int, help="Database port")
+parser.add_argument("--database", type=str, help="Database name")
+parser.add_argument("--username", type=str, help="Database username")
+parser.add_argument("--password", type=str, help="Database password")
+parser.add_argument("--run_id", type=int, help="Unique run identifier")
 
 
 def connect_with_connector() -> sqlalchemy.engine.base.Engine:
@@ -231,7 +270,6 @@ def main(parameter_config, run_config):
         # Everything after this is hardwired right now.
         # record_interval=100,
         m0_known=False,
-        error_control=param_dict["error_control"],
         interleaved=False,
         undershoot_prob=0.2,
         fin_par=False,
@@ -258,40 +296,10 @@ def main(parameter_config, run_config):
     # Convert DataFrame to SQL
     df.to_sql("simulation_results", con=engine, if_exists="append", index=False)
 
-class ParseKwargs(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
-        setattr(namespace, self.dest, dict())
-        for value in values:
-            key, value = value.split('=')
-            getattr(namespace, self.dest)[key] = value
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(
-        description="Run a simulation and store the results in a database."
-    )
-    # Add arguments for each of the configuration options your simulation requires
-    parser.add_argument("--alpha", type=float, help="FDR level")
-    parser.add_argument("--beta", type=float, help="Optional FNR level")
-    parser.add_argument("--cut_type", type=str, help="Type of cut")
-    parser.add_argument("--theta0", type=float, help="Null hypothesis parameter value.")
-    parser.add_argument("--theta1", type=float, help="Alternative hypothesis parameter value.")
-    parser.add_argument("--extra_params", nargs='*', action=ParseKwargs, help="other generating parameters")
-    parser.add_argument("--n_periods", type=int, help="Number of periods")
-    parser.add_argument("--m_null", type=int, help="Number of null hypotheses")
-    parser.add_argument("--m_alt", type=int, help="Number of alternative hypotheses")
-    parser.add_argument("--hyp_type", type=str, help="Type of hypothesis")
-    parser.add_argument("--sim_reps", type=int, help="Number of simulation repetitions")
-    parser.add_argument("--error_control", type=str, help="Error control method. 'pfdr', 'fdr' or don't pass anything. If nothing is passed, will use unscaled BL cutoffs.")
-    # Metadata/launch specific
-    parser.add_argument("--cloud", action="store_true", help="Run in cloud mode")
-    parser.add_argument("--seed", type=int, help="Random seed for reproducibility")
-    parser.add_argument("--host", type=str, help="Database host", default=3306)
-    parser.add_argument("--port", type=int, help="Database port")
-    parser.add_argument("--database", type=str, help="Database name")
-    parser.add_argument("--username", type=str, help="Database username")
-    parser.add_argument("--password", type=str, help="Database password")
-    parser.add_argument("--run_id", type=int, help="Unique run identifier")
+
 
     # Add more arguments as needed
 
