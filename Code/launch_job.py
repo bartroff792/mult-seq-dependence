@@ -88,6 +88,8 @@ def launch_job(project_id, region, job_name, config, run_name=None):
 
     client = run_v2.JobsClient()
     # Build the set of commandline args for the job
+    if run_name is not None:
+        config["run_name"] = run_name
     args = build_args(config)
     # print(" ".join(args))
     # raise ValueError()

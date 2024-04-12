@@ -431,6 +431,7 @@ def copula_draw(
         unif_draw_list = []
         for group_number, rho_val in rho.rho.items():
             group_hyps = rho.group_ser[rho.group_ser==group_number].index
+            # print(f"{group_number=} {rho_val=} {group_hyps=}")
             group_size = len(group_hyps)
             cov_mat = simple_toeplitz_corr_mat(rho_val, group_size, rand_order)
             group_unif_draw = pd.DataFrame(
@@ -455,6 +456,13 @@ def simulate_correlated_observations(
     hyp_idx = check_params(hyp_type, params)
     # Draw from the copula.
     unif_draw = copula_draw(hyp_idx, n_periods, rho, rand_order)
+    # check that the indexes of the unif_draw and of the params match (hyp_idx), up to order, 
+    # then reorder the unif_draw to hyp_idx
+    assert hyp_idx.sort_values().equals(unif_draw.columns.sort_values()), "Hypothesis names do not match."
+    unif_draw = unif_draw.reindex(columns=hyp_idx)
+
+    # ud_corr = unif_draw.corr().sort_index(axis=0).sort_index(axis=1).round(2)
+    # print(f"{ud_corr=}")
     if hyp_type == "binom":
         dist = stats.binom(**params)
         obs = {
@@ -473,6 +481,7 @@ def simulate_correlated_observations(
         total_rate_dist = stats.poisson(params["mu"])
         # Copula draw for the rates
         rate_unif_draw = copula_draw(hyp_idx, n_periods, rho, rand_order)
+        rate_unif_draw = rate_unif_draw.reindex(columns=hyp_idx)
         total_obs = pd.DataFrame(
             total_rate_dist.ppf(rate_unif_draw), columns=hyp_idx, index=unif_draw.index
         )
@@ -490,7 +499,8 @@ def simulate_correlated_observations(
         }
     else:
         raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
-
+    # obs_corr = obs["obs"].corr().sort_index(axis=0).sort_index(axis=1).round(2)
+    # print(f"{obs_corr=}")
     return obs
 
 
@@ -648,7 +658,7 @@ def toep_corr_matrix(m, rho, m1=None, rho1=None, rand_order=False):
         raw_corr_mat = toeplitz(rho ** abs(np.arange(m)))
         if rand_order:
             ordering = numpy.random.permutation(np.arange(m))
-            print(ordering)
+            # print(ordering)
             corr_mat = (raw_corr_mat[ordering, :])[:, ordering]
             return corr_mat
         else:
@@ -789,7 +799,7 @@ def df_generator(df: pd.DataFrame) -> online_data:
 class infinite_dgp_wrapper(df_dgp_wrapper):
     """Creates a dgp that will continuously generate minibatches of data as needed"""
 
-    def __init__(self, gen_llr_kwargs, drop_old_data=True):
+    def __init__(self, gen_llr_kwargs, drop_old_data=False):
         self._gen_kwargs = gen_llr_kwargs
         self._llr_df, self._obs_dict = generate_llr(**gen_llr_kwargs)
         for obs_entry_name, obs_entry_df in self._obs_dict.items():
@@ -799,11 +809,12 @@ class infinite_dgp_wrapper(df_dgp_wrapper):
         self._iter_rows = self._llr_df.iterrows()
         self._drop_old_data = drop_old_data
 
-    def __call__(self, col_list):
+    def __call__(self, col_list: List[str]) -> pd.Series:
+        """Gets the next row of data from the DGP."""
         try:
             _, data_ser = next(self._iter_rows)
         except StopIteration as ex:
-            # TODO: This seems sketchy... what's happening here
+            # TODO: This seems sketchy... what's happening here?
             final_llr_row = self._llr_df.iloc[-1]
             llr_df, obs_data_dict = generate_llr(**self._gen_kwargs)
             llr_df = llr_df + final_llr_row
@@ -817,7 +828,7 @@ class infinite_dgp_wrapper(df_dgp_wrapper):
         return data_ser[col_list]
 
     def get_data_record(self):
-        print("get_data_record")
+        # print("get_data_record")
         if self._drop_old_data:
             raise ValueError("DGP drops old data. Cannot return full record.")
         else:

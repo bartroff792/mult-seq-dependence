@@ -3,6 +3,22 @@
 python docker_main.py --alpha=0.05 --beta=0.2 --seed=42 --cut_type=BL --p0=0.5 --p1=0.5 --n_periods=100 \
     --m_null=100 --m_alt=100 --hyp_type=pois --sim_reps=1000 --seed=42 --host=localhost --database=MultSeq \
      --username=root --password=1234 --run_id=1 
+
+     
+Might need to build db with:
+
+drop table simulation_metadata;
+drop TABLE simulation_params;
+drop TABLE simulation_results;
+CREATE TABLE simulation_metadata (
+    cloud_execution VARCHAR(255) NOT NULL,
+    run_start DATETIME NOT NULL,
+    total_runs INT NOT NULL,
+    sim_reps INT NOT NULL,
+    exec_name VARCHAR(255) NOT NULL,
+    PRIMARY KEY (cloud_execution)
+);
+
 """
 
 import argparse
@@ -39,7 +55,7 @@ class ParseKwargs(argparse.Action):
         for value in values:
             key, value = value.split('=')
             getattr(namespace, self.dest)[key] = value
-            
+
 parser = argparse.ArgumentParser(
     description="Run a simulation and store the results in a database."
 )
@@ -66,6 +82,7 @@ parser.add_argument("--database", type=str, help="Database name")
 parser.add_argument("--username", type=str, help="Database username")
 parser.add_argument("--password", type=str, help="Database password")
 parser.add_argument("--run_id", type=int, help="Unique run identifier")
+parser.add_argument("--run_name", type=str, default=None, help="Optional run name")
 
 
 def connect_with_connector() -> sqlalchemy.engine.base.Engine:
@@ -106,13 +123,14 @@ def connect_with_connector() -> sqlalchemy.engine.base.Engine:
     pool = sqlalchemy.create_engine(
         "mysql+pymysql://",
         creator=getconn,
-        # ...
     )
     return pool
 
 
 def get_connection(config):
     cloud = config.pop("cloud", False)
+    # This is actually an execution name
+    run_name = config.pop("run_name", None),
     if not cloud:
         # Get SQL connection
         username = config.pop("username", None)
@@ -143,6 +161,7 @@ def get_connection(config):
         "total_runs": total_runs,
         "cloud_execution": cloud_execution,
         "seed": seed,
+        "run_name": run_name,
     }
 
 
@@ -223,6 +242,7 @@ def main(parameter_config, run_config):
         job_reps = sim_reps
 
     if run_id == 0:
+        run_name = run_config.pop("run_name", "")
         metadata_df = pd.DataFrame(
             [
                 pd.Series(
@@ -231,6 +251,7 @@ def main(parameter_config, run_config):
                         "run_start": run_start,
                         "total_runs": total_runs,
                         "sim_reps": sim_reps,
+                        "exec_name": run_name,
                     }
                 )
             ]
@@ -258,8 +279,14 @@ def main(parameter_config, run_config):
         print(md_dt_str)
         print(param_df_str)
         print(param_df_dt_str)
-        param_df.to_sql("simulation_params", con=engine, if_exists="append", index=True)
-        metadata_df.to_sql("simulation_metadata", con=engine, if_exists="append", index=True)
+        try:
+            param_df.to_sql("simulation_params", con=engine, if_exists="append", index=True)
+        except Exception as ex:
+            raise ValueError(f"Error writing parameters to database: {ex}\n{param_df}\n {param_df.dtypes}")
+        try:
+            metadata_df.to_sql("simulation_metadata", con=engine, if_exists="append", index=True)
+        except Exception as ex:
+            raise ValueError(f"Error writing metadata to database: {ex}\n{metadata_df}\n {metadata_df.dtypes}")
 
     # Call your simulation function
 

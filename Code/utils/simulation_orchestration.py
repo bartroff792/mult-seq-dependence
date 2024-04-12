@@ -524,3 +524,193 @@ def compute_fdp(tout: multseq.MSPRTOut, ground_truth: pd.Series) -> pd.Series:
             "avg_sample_number",
         ],
     )
+
+
+def single_sim(
+    alpha=0.1,
+    beta=None,
+    cut_type="BL",
+    theta0: float = 0.05,
+    theta1: float = 0.045,
+    extra_params: Optional[Dict[str, Union[float, int]]] = None,
+    n_periods=None,
+    m_null: Optional[int]=None,
+    m_alt: Optional[int]=None,
+    # m0_known=False,
+    error_control: Optional[Literal["pfdr", "fdr"]] = "fdr",
+    rho=-0.5,
+    interleaved=False,
+    undershoot_prob=0.2,
+    # fin_par=True,
+    hyp_type="drug",
+    # fh_sleep_time=60,
+    do_iterative_cutoff_MC_calc=False,
+    stepup=False,
+    fh_cutoff_imp_sample=True,
+    fh_cutoff_imp_sample_prop: float = 0.5,
+    fh_cutoff_imp_sample_hedge: float = 0.9,
+    load_data=None,
+    # divide_cores=None,
+    # split_corr=False,
+    # rho1=None,
+    rand_order=False,
+    # cummax=False,
+) -> pd.DataFrame:
+    """Perform sequential stepdown procedure on synthetic drug data.
+
+    args:
+        alpha: (float)
+        beta: (float, optional) if set, indicates infinite horizon general
+            procedure. If None, use finite horizon rejective.
+        BH: (bool)
+        record_interval: (int)
+        p0: (float)
+        p1: (float)
+        n_periods: (int)
+        m_null: (int)
+        max_magnitude: (float)
+        sim_reps: (int) number of times to regenerate the data path for
+            establishing average FDP.
+        m0_known: (bool) if fdr-controlling scaling of the alpha cutoff vector
+            is to be performed, indicates whether to assume number of true
+            nulls is known.
+        error_control (str): 'pfdr' or 'fdr' or None. If None, no error control
+            adjustment beyond the standard BL alpha values is performed.
+        rho: (float) correlation coefficient for correlated statistics
+        interleaved: (bool) whether or not to interleave the true and false
+            null hypotheses
+        undershoot_prob: (float) probability of undershoot:
+                For finite horizon, effects the number of MC cutoff sims
+                For inifinte horizon, effects the artificial horizon
+    return:
+    """
+    # Confirm that null and alternative aren't identical
+    rel_base = np.max([1e-5, np.abs(theta0), np.abs(theta1)])
+    rel_diff = np.abs(theta0 - theta1) / rel_base
+    assert rel_diff > 1e-5, "p0 and p1 must be different"
+    
+
+    # Construct the DGP from the inputs
+    if load_data is None:
+        # If the number of alternative hypotheses is not specified, assume it is equal to the number of null hypotheses.
+        if m_alt is None:
+            logging.info("m_alt not specified, assuming m_alt = m_null")
+            m_alt = m_null
+        m_total = m_null + m_alt
+        params, ground_truth = data_funcs.construct_dgp(
+            m_null=m_null,
+            m_alt=m_alt,
+            theta0=theta0,
+            theta1=theta1,
+            hyp_type=hyp_type,
+            extra_params=extra_params,
+            interleaved=interleaved,
+        )
+        params0, _ = data_funcs.construct_dgp(
+            m_null=m_null + m_alt,
+            m_alt=0,
+            theta0=theta0,
+            theta1=theta1,
+            hyp_type=hyp_type,
+            extra_params=extra_params,
+            interleaved=False,
+        )
+        params1, _ = data_funcs.construct_dgp(
+            m_null=0,
+            m_alt=m_null + m_alt,
+            theta0=theta0,
+            theta1=theta1,
+            hyp_type=hyp_type,
+            extra_params=extra_params,
+            interleaved=False,
+        )
+
+    else:
+        params = load_data["params"]
+        ground_truth = load_data["ground_truth"]
+        params0 = load_data["params0"]
+        params1 = load_data["params1"]
+        m_total = len(ground_truth)
+        # raise NotImplementedError("Loading data not implemented yet")
+        # ground_truth = load_data.pop("ground_truth")
+        # params = load_data
+    
+    m_total = len(ground_truth)
+
+    
+    # print(f"{params=}")
+    # print(f"{ground_truth=}")
+    # print(f"{params0=}")
+    # print(f"{params1=}")
+
+    # Calculate the LLR cutoffs and the number of simulation steps to run.
+    # If n
+    scaled_alpha, scaled_beta = construct_sim_pvalue_cutoffs(
+        m_total=m_total,
+        alpha=alpha,
+        beta=beta,
+        error_control=error_control,
+        cut_type=cut_type,
+        stepup=stepup,
+        m0=m_null,
+    )
+    cutoff_df, n_periods = calc_llr_cutoffs(
+        theta0=theta0,
+        theta1=theta1,
+        extra_params=extra_params,
+        hyp_type=hyp_type,
+        alpha=scaled_alpha,
+        beta=scaled_beta,
+        n_periods=n_periods,
+        undershoot_prob=undershoot_prob,
+        do_iterative_cutoff_MC_calc=do_iterative_cutoff_MC_calc,  # what is this?
+        fh_cutoff_imp_sample=fh_cutoff_imp_sample,
+        fh_cutoff_imp_sample_prop=fh_cutoff_imp_sample_prop,
+        fh_cutoff_imp_sample_hedge=fh_cutoff_imp_sample_hedge,
+    )
+    # TODO: add options for scaling style
+
+
+    check_params(
+        hyp_type=hyp_type,
+        params=params,
+    )
+    rejective = "B" not in cutoff_df.columns
+
+    if rejective:
+        llr_data, obs_data = generate_llr(
+            params=params,
+            n_periods=n_periods,
+            rho=rho,
+            hyp_type=hyp_type,
+            params0=params0,
+            params1=params1,
+            rand_order=rand_order,
+        )
+        dgp = data_funcs.df_dgp_wrapper(llr_data)
+    else:
+        dgp = data_funcs.infinite_dgp_wrapper(
+            dict(
+                params=params,
+                n_periods=n_periods,
+                rho=rho,
+                hyp_type=hyp_type,
+                params0=params0,
+                params1=params1,
+                rand_order=rand_order,
+            ),
+            drop_old_data=False,
+        )
+    hypothesis_idx = list(params.values())[0].index
+    test_output = multseq.msprt(
+                statistics=data_funcs.online_data(hypothesis_idx, dgp),
+                cutoffs=cutoff_df,
+                record_interval=100,
+                stepup=stepup,
+                rejective=rejective,
+                verbose=False,
+            )
+    if not rejective:
+        llr_data = dgp.get_data_record()
+
+    return llr_data, test_output
