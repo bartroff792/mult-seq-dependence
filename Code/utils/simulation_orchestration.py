@@ -22,25 +22,10 @@ from numpy import arange, diff, zeros, mod, ones, log
 import numpy
 import numpy as np
 import pandas as pd
-import seaborn as sns
-from . import multseq
 
-# import visualizations
-# import string
 from tqdm import tqdm
-from . import common_funcs
-from .cutoff_funcs import create_fdr_controlled_bl_alpha_indpt
-from . import data_funcs
-from .data_funcs import (
-    generate_llr,
-    check_params,
-)
-from . import data_funcs, cutoff_funcs
-import time
-import logging, traceback
-import multiprocessing
-import traceback
-import warnings
+from . import data_funcs, cutoff_funcs, multseq
+import logging
 from dataclasses import dataclass
 
 AnalysisFuncType = Callable[[multseq.MSPRTOut, pd.Series], pd.Series]
@@ -82,7 +67,7 @@ def run_mc_synth_sim_tests(
     Returns:
         out_list: (List[multseq.MSPRTOut]) List of MultSPRT outputs.
     """
-    check_params(
+    data_funcs.check_params(
         hyp_type=hyp_type,
         params=params,
     )
@@ -92,7 +77,7 @@ def run_mc_synth_sim_tests(
 
     for i in main_iter:
         if rejective:
-            llr_data, obs_data = generate_llr(
+            llr_data, obs_data = data_funcs.generate_llr(
                 params=params,
                 n_periods=n_periods,
                 rho=rho,
@@ -133,11 +118,11 @@ def calc_llr_cutoffs(
     theta0: float,
     theta1: float,
     extra_params: Dict[str, Any],
-    hyp_type: Literal["pois", "binom", "drug"],
+    hyp_type: Literal["pois", "binom", "drug", "norm_loc_known_var"],
     alpha: np.ndarray,
     beta: Optional[np.ndarray] = None,
     n_periods=None,
-    undershoot_prob=0.1,
+    undershoot_prob=0.25,
     do_iterative_cutoff_MC_calc=False,  # what is this?
     fh_cutoff_imp_sample=False,
     fh_cutoff_imp_sample_prop=1.0,
@@ -214,6 +199,8 @@ def calc_llr_cutoffs(
 
         # Next calculate llr cutoffs
         min_alpha_diff = min(diff(alpha))
+        if min_alpha_diff < 0.01:
+            min_alpha_diff = 0.01
         k_reps = int(1.0 / float(undershoot_prob * min_alpha_diff))
 
         #        raise ValueError("Alpha min {0} max {1}".format(scaled_alpha_vec.min(), scaled_alpha_vec.max()))
@@ -244,21 +231,7 @@ def calc_llr_cutoffs(
     return cutoff_df, n_periods
 
 
-def construct_base_pvalue_cutoffs(
-    cut_type: Literal["BH", "BY", "BL", "HOLM"], m_total: int, alpha: float
-) -> np.ndarray:
-    if (cut_type == "BY") or (cut_type == "BL"):
-        alpha_vec_raw = create_fdr_controlled_bl_alpha_indpt(alpha, m_total)
-    elif cut_type == "BH":
-        alpha_vec_raw = alpha * arange(1, 1 + m_total) / float(m_total)
 
-    # Holm
-    elif cut_type == "HOLM":
-        alpha_vec_raw = alpha / (float(m_total) - arange(m_total))
-    else:
-        raise Exception("Not implemented yet")
-
-    return alpha_vec_raw
 
 
 def construct_sim_pvalue_cutoffs(
@@ -277,12 +250,12 @@ def construct_sim_pvalue_cutoffs(
         m1 = None
     else:
         m1 = m_total - m0
-    alpha_vec = construct_base_pvalue_cutoffs(cut_type, m_total, alpha)
+    alpha_vec = cutoff_funcs.construct_base_pvalue_cutoffs(cut_type, m_total, 1.0 / (10.0 * m_total))
     if beta is not None:  # Infinite horizon
-        beta_vec = construct_base_pvalue_cutoffs(cut_type, m_total, beta)
+        beta_vec = cutoff_funcs.construct_base_pvalue_cutoffs(cut_type, m_total, 1.0 / (10.0 * m_total))
     else:
         beta_vec = None
-
+    print(f"raw {alpha_vec=}")
     if error_control == "fdr":
 
         alpha_vec = cutoff_funcs.apply_fdr_control_to_alpha_vec(
@@ -430,7 +403,7 @@ def mc_sim_and_analyze_synth_data(
         error_control=error_control,
         cut_type=cut_type,
         stepup=stepup,
-        m0=m_null,
+        m0=None,
     )
     cutoff_df, n_periods = calc_llr_cutoffs(
         theta0=theta0,
@@ -450,7 +423,7 @@ def mc_sim_and_analyze_synth_data(
 
     rejective = "B" in cutoff_df.columns
     # Confirm that it doesn't crash when generating the LLR
-    llr, obs = generate_llr(
+    llr, obs = data_funcs.generate_llr(
         params=params,
         n_periods=n_periods,
         rho=rho,
@@ -671,14 +644,14 @@ def single_sim(
     # TODO: add options for scaling style
 
 
-    check_params(
+    data_funcs.check_params(
         hyp_type=hyp_type,
         params=params,
     )
     rejective = "B" not in cutoff_df.columns
 
     if rejective:
-        llr_data, obs_data = generate_llr(
+        llr_data, obs_data = data_funcs.generate_llr(
             params=params,
             n_periods=n_periods,
             rho=rho,

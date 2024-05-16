@@ -284,7 +284,7 @@ def construct_dgp(
     theta0: float,
     theta1: float,
     interleaved: bool,
-    hyp_type: Literal["binom", "pois"],
+    hyp_type: Literal["binom", "pois", "norm_loc_known_var"],
     extra_params: Optional[Dict[str, float]] = None,
 ) -> Tuple[Dict[str, pd.Series], pd.Series]:
     """Construct generating parameters and ground truth for a given hypothesis type.
@@ -337,12 +337,18 @@ def construct_dgp(
         if len(extra_params) > 1:
             warnings.warn("Extra parameters not used.", UserWarning)
         return {"mu": total_reaction_rate, "p": proportion_amnesia}, ground_truth
+    elif hyp_type == "norm_loc_known_var":
+        mu = theta0 * ground_truth + theta1 * ~ground_truth
+        sigma_sq = pd.Series(np.repeat(extra_params["sigma_sq"], m_null + m_alt), index=hyp_names)
+        if len(extra_params) > 1:
+            warnings.warn("Extra parameters not used.", UserWarning)
+        return {"mu": mu, "sigma_sq": sigma_sq}, ground_truth
     else:
         raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
 
 
 def check_params(
-    hyp_type: Literal["drug", "pois", "binom"], params: Dict[str, pd.Series]
+    hyp_type: Literal["drug", "pois", "binom", "norm_loc_known_var"], params: Dict[str, pd.Series]
 ) -> pd.Index:
     """Confirms that the right keys are present in the params dictionary, and returns the names of the hypotheses.
 
@@ -380,6 +386,11 @@ def check_params(
             params["n"]
         ), "n and p must have the same length."
         return (params["p"]).index
+    elif hyp_type == "norm_loc_known_var":
+        assert len(params) == 2, "Normal type must have exactly 2 parameters."
+        assert "mu" in params, "Normal type must have a mu parameter."
+        assert "sigma_sq" in params, "Normal type must have a sigma_sq parameter."
+        return (params["mu"]).index
     else:
         raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
 
@@ -449,7 +460,7 @@ def simulate_correlated_observations(
     params: Dict[str, pd.Series],
     n_periods: int,
     rho: Union[float, CorrelationContainer],
-    hyp_type: Literal["binom", "pois", "drug"],
+    hyp_type: Literal["binom", "pois", "drug", "norm_loc_known_var"],
     rand_order: bool = False,
 ) -> Dict[str, pd.DataFrame]:
     # Get full index of hypothesis names
@@ -497,6 +508,13 @@ def simulate_correlated_observations(
             "relevant_events": relevant_events_counts,
             "non_relevant_events": non_relevant_events_counts,
         }
+    elif hyp_type == "norm_loc_known_var":
+        dist = stats.norm(loc=params["mu"], scale=np.sqrt(params["sigma_sq"]))
+        obs = {
+            "obs": pd.DataFrame(
+                dist.ppf(unif_draw), columns=hyp_idx, index=unif_draw.index,
+            )
+        }
     else:
         raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
     # obs_corr = obs["obs"].corr().sort_index(axis=0).sort_index(axis=1).round(2)
@@ -506,14 +524,14 @@ def simulate_correlated_observations(
 
 def compute_llr(
     observed_data: Dict[str, pd.DataFrame],
-    hyp_type: Literal["drug", "binom", "pois", "gaussian"],
+    hyp_type: Literal["drug", "binom", "pois", "gaussian", "norm_loc_known_var"],
     params0: Dict[str, pd.Series],
     params1: Dict[str, pd.Series],
     cumulative=True,
 ) -> pd.DataFrame:
     """Computes the log likelihood ratio for each hypothesis at each timestep.
 
-    Computes manually using hard derived formulae. Warning: this *always* expects the entries in
+    Computes manually using hand derived formulae. Warning: this *always* expects the entries in
     the dataframes in observed_data to be the new observations only, NOT the cumulative observations.
     The `cumulative` argument means that the cumulative LLR should be returned (default). When
     False, the entries in the returned data frame are the stepwise LLRs.
@@ -578,6 +596,20 @@ def compute_llr(
             obs = observed_data["obs"]
             scaled_rate = params1["mu"] - params0["mu"]
         llr = obs.multiply(np.log(params1["mu"] / params0["mu"])).subtract(scaled_rate)
+    elif hyp_type == "norm_loc_known_var":
+        if cumulative:
+            obs = observed_data["obs"].cumsum()
+            scaled_loc0 = time_idx.dot(pd.DataFrame(params0["mu"]).T)
+            scaled_loc1 = time_idx.dot(pd.DataFrame(params1["mu"]).T)
+            scaled_var = time_idx.dot(pd.DataFrame(params0["sigma_sq"]).T)
+        else:
+            obs = observed_data["obs"]
+            scaled_loc0 = params0["mu"]
+            scaled_loc1 = params1["mu"]
+            scaled_var = params0["sigma_sq"]
+        const_term = -0.5 * ((scaled_loc1**2) - (scaled_loc0**2)) / scaled_var
+        slope_val = (scaled_loc1 - scaled_loc0)  / scaled_var
+        llr = obs.multiply(slope_val).add(const_term)
     else:
         raise ValueError("Unrecognized hypothesis type: {0}".format(hyp_type))
     for observed_entry_name, observed_entry_df in observed_data.items():
@@ -591,7 +623,7 @@ def generate_llr(
     params: Dict[str, pd.Series],
     n_periods: int,
     rho: Optional[float],
-    hyp_type: Literal["drug", "binom", "pois", "gaussian"],
+    hyp_type: Literal["drug", "binom", "pois", "gaussian", "norm_loc_known_var"],
     params0: Dict[str, pd.Series],
     params1: Dict[str, pd.Series],
     rand_order: bool = False,

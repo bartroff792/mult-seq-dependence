@@ -14,6 +14,7 @@ The main functions are:
 
 
 """
+
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from numpy.typing import NDArray
 import numpy as np
@@ -191,11 +192,13 @@ def msprt(
         # Copy data to prevent deletion
         statistics = data_funcs.df_generator(statistics.copy())
     else:
-        assert isinstance(statistics, data_funcs.PareableStatisticsStreamer), "statistics must be a dataframe or implement the PareableStatisticsStreamer interface"
+        assert isinstance(
+            statistics, data_funcs.PareableStatisticsStreamer
+        ), "statistics must be a dataframe or implement the PareableStatisticsStreamer interface"
 
     if (not rejective) and (cutoffs["B"]).isna().any():
         raise ValueError("No B acceptance vector passed for acceptive-rejective test")
-    if rejective: # and (B_vec is not None):
+    if rejective:  # and (B_vec is not None):
         # raise ValueError("B acceptance vector passed for rejective test")
         # TODO: raise a warning here
         pass
@@ -273,7 +276,7 @@ def msprt(
                     logging.info("num new accepts >0" + str(step))
                 acc_level_term[j_accepted : (j_accepted + num_new_accepts)] = step
                 j_accepted = j_accepted + num_new_accepts
-                # For each accepted hypothesis, record the step and level at which 
+                # For each accepted hypothesis, record the step and level at which
                 # it was accepted
                 termination_level.loc[accept_cols, "accLevel"] = j_accepted
                 termination_level.loc[accept_cols, "step"] = step
@@ -318,11 +321,11 @@ def msprt(
             logging.debug("Stopping early on step " + str(step))
             #            print("end\n", data_ser, "\n", j_rejected, j_accepted)
             break
-    
+
     # WARNING! might break by skipping this
     # rej_level_term.replace(np.inf, step + 1, inplace=True)
     # acc_level_term.replace(np.inf, step + 1, inplace=True)
-        
+
     # Record final diagnostic data
     if verbose:
         logging.info(
@@ -373,33 +376,77 @@ def msprt(
 
 
 def naive_barrier_trips(
-    data_ser: NDArray[np.float32],
-    cutoff_vec: NDArray[np.float32],
+    data_ser: pd.Series,
+    cutoff_vec: pd.Series,
     num_eliminated: int,
     highlow: HighLow,
 ) -> NDArray[np.bool_]:
     """Returns a boolean vector indicating whether or not the jth most
-    significant active statistic tripped the jth active barrier."""
-    #    print(data_ser[:, None])
-    #    print(cutoff_vec[None, num_eliminated:])
-    #    raise ValueError()
+    significant active statistic tripped the jth active barrier.
+
+    The number of cutoffs minus the number of eliminated hypotheses must be
+    greater than or equal to the number of active hypotheses. The reason we
+    do not require equality is that, in the general/infinite horizon/acceptive-rejective case,
+    we may have some cutoffs clipped from the rejective side along
+    with some corresponding streams, but none (or fewer) clipped from the
+    acceptive side. In such a case, we know nothing will trigger the least
+    significant barrier, so we can ignore it, but we include it as a 0 anyway.
+    We do want to know the interaction of the streams with the remaining
+    significant barriers however.
+
+    Args:
+        data_ser: series of test statistics for active hypotheses at given
+            phase.
+        cutoff_vec: vector of statistic cutoff values, with 0 index being the
+            most significant. Passed whole, regardless of previous rejections.
+        num_elminated: integer number of hypotheses that have been eliminated.
+            This will effectively ignore the num_eliminated most extreme cutoffs.
+        highlow: whether to test for high or low rejections. "high" means that
+            the test statistic must be greater than the cutoff to trip the barrier.
+            "low" means that the test statistic must be less than the cutoff to
+            trip the barrier.
+
+    Returns:
+        A boolean vector of length equal to the number of active barriers, where
+        the jth element is True if the jth most significant active statistic
+        tripped the jth active barrier.
+    """
+
     # Calculate the number #{j: p_{j} > or < alpha_i } for each i
     if isinstance(data_ser, pd.Series):
         data_ser = data_ser.values
     if isinstance(cutoff_vec, pd.Series):
         cutoff_vec = cutoff_vec.values
+
+
+    n_cutoffs = len(cutoff_vec)
+    n_streams = len(data_ser)
+    assert n_cutoffs - num_eliminated >= n_streams, f"{n_cutoffs=} - {num_eliminated=} !>= {n_streams=}"
+
+    # Clip off the most extreme cutoffs (which have already been triggered)
     remaining_cutoffs = cutoff_vec[None, num_eliminated:]
+    if num_eliminated > 0:
+        pass  # For debug purposes only
+    # Confirm ordering and calculate number of active test statistics that have
+    # tripped each barrier.
     if highlow == "high":
+        assert (np.diff(cutoff_vec) <= 0).all()
         num_crossing_barrier = (data_ser[:, None] > remaining_cutoffs).sum(0)
     elif highlow == "low":
+        assert (np.diff(cutoff_vec) >= 0).all()
         num_crossing_barrier = (data_ser[:, None] < remaining_cutoffs).sum(0)
     else:
         raise ValueError("Unknown rejection direction: " + str(highlow))
     # Inner comparison tests p_{(i)} < alpha_i
+    assert len(num_crossing_barrier.shape) == 1
+    assert len(remaining_cutoffs.shape) == 2
+    assert len(num_crossing_barrier) == len(
+        remaining_cutoffs[0, :]
+    ), f"Length mismatch: {len(num_crossing_barrier)=} vs {len(remaining_cutoffs)=}; {num_eliminated=}"
     naive_barrier_tripped = (
         num_crossing_barrier >= np.arange(1, 1 + len(num_crossing_barrier))
     ).astype(bool)
-    return naive_barrier_tripped
+    return naive_barrier_tripped[:n_streams]
 
 
 # %% step up and step down tests
@@ -419,6 +466,7 @@ def step_up_elimination(
             TODO: possibly change that
         num_elminated: integer number of
     """
+    raise NotImplementedError("This function is not yet implemented")
     # Calculate number of active test statistics that have tripped each barrier
     barrier_crossed_mask = naive_barrier_trips(
         data_ser, cutoff_vec, num_eliminated, highlow
@@ -442,7 +490,12 @@ def step_up_elimination(
         return [], 0
 
 
-def step_down_elimination(data_ser, cutoff_vec, num_eliminated, highlow="high"):
+def step_down_elimination(
+    data_ser: pd.Series,
+    cutoff_vec: pd.Series,
+    num_eliminated: int,
+    highlow: Literal["high", "low"] = "high",
+) -> Tuple[List[Any], int]:
     """Runs a rejection or acceptance phase of a sequential stepdown procedure.
 
     Args:
@@ -451,10 +504,25 @@ def step_down_elimination(data_ser, cutoff_vec, num_eliminated, highlow="high"):
         cutoff_vec: vector of statistic cutoff values, with 0 index being the
             most significant. Passed whole, regardless of previous rejections.
             TODO: possibly change that
-        num_elminated: integer number of
+        num_elminated: integer number of hypotheses that have been eliminated.
+        highlow: whether to test for high or low rejections. "high" means that
+            the test statistic must be greater than the cutoff to trip the barrier.
+            "low" means that the test statistic must be less than the cutoff to
+            trip the barrier.
+
+    Returns:
+        A tuple of two elements:
+            - A list of hypotheses that have been newly rejected or accepted
+            - An integer count of the number of hypotheses that have been newly
+              rejected or accepted.
     """
     assert len(cutoff_vec) - num_eliminated >= len(data_ser), "Too few cutoffs"
-    # Calculate number of active test statistics that have tripped each barrier
+    # Calculate number of active test statistics that have tripped each barrier.
+    # We call this "naive" for stepdown because we might have a situation like
+    # this (from most extreme to least extreme):
+    # 1 trip, 2 trip, 2 trip, 4 trip
+    # Even though the 4th barrier was tripped by 4 statistics, the 3rd barrier
+    # was not tripped by 3, so we only reject the first two hypotheses.
     naive_barrier_tripped = naive_barrier_trips(
         data_ser, cutoff_vec, num_eliminated, highlow
     )
@@ -467,12 +535,16 @@ def step_down_elimination(data_ser, cutoff_vec, num_eliminated, highlow="high"):
         # Inverts bits of array and searches for the index at which it switches
         # from 0 to 1, which is equivalent to the count of newly rejected (or
         # accepted) hypotheses at this stage under stepdown
-        num_new_hyps = (~barrier_crossed_mask).searchsorted([True])[0]
+        num_new_hyps = (~barrier_crossed_mask).searchsorted([True])[
+            0
+        ]  # TODO: check this and clean it up
         new_cutoff = cutoff_vec[num_eliminated + num_new_hyps - 1]
         if highlow == "high":
             trip_cols = data_ser.index[data_ser > new_cutoff]
         elif highlow == "low":
             trip_cols = data_ser.index[data_ser < new_cutoff]
+        else:
+            raise ValueError("Unknown rejection direction: " + str(highlow))
         return trip_cols, num_new_hyps
     else:
         # TODO:

@@ -43,6 +43,32 @@ class TestComputeLLR:
         # hypothesis is increasing, ie that the final one is more
         # likely to be rejected than the first
         assert np.diff(snr).min() > 0.5
+
+    def test_norm_loc_known_var(self):
+        hyp_idx = pd.Index(["a", "b", "c"], name="hyp_name")
+        params = {"mu": pd.Series([1.0, 2.0, 3.0], index=hyp_idx),
+                  "sigma_sq": pd.Series([4.0, 4.0, 4.0], index=hyp_idx)}
+        params0 = copy.deepcopy(params)
+        params0["mu"][:] = 1.0
+        params1 = copy.deepcopy(params)
+        params1["mu"][:] = 3.0
+        np.random.seed(42)
+        obs = data_funcs.simulate_correlated_observations(
+            params=params,
+            n_periods=50,
+            rho=0.5,
+            hyp_type="norm_loc_known_var",
+        )
+        llr = data_funcs.compute_llr(observed_data=obs,
+                               hyp_type="norm_loc_known_var",
+                               params0=params0,
+                               params1=params1,
+                               cumulative=False)
+        snr = llr.mean() / llr.std()
+        # Ensure that the relative direction of llr for each
+        # hypothesis is increasing, ie that the final one is more
+        # likely to be rejected than the first
+        assert np.diff(snr).min() > 0.5
     
 
     def test_binom_cumulative(self):
@@ -71,6 +97,29 @@ class TestComputeLLR:
         trend = llr.diff().mean()
         # 
         assert np.diff(trend).min() > 0.1
+
+
+    def test_norm_loc_known_var_cumulative(self):
+        hyp_idx = pd.Index(["a", "b", "c"], name="hyp_name")
+        params = {"mu": pd.Series([1.0, 2.0, 3.0], index=hyp_idx),
+                  "sigma_sq": pd.Series([4.0, 4.0, 4.0], index=hyp_idx)}
+        params0 = copy.deepcopy(params)
+        params0["mu"][:] = 1.0
+        params1 = copy.deepcopy(params)
+        params1["mu"][:] = 3.0
+        obs = data_funcs.simulate_correlated_observations(
+            params=params,
+            n_periods=50,
+            rho=0.5,
+            hyp_type="norm_loc_known_var",
+        )
+        llr = data_funcs.compute_llr(observed_data=obs,
+                               hyp_type="norm_loc_known_var",
+                               params0=params0,
+                               params1=params1,
+                               cumulative=True)
+        trend = llr.diff().mean()
+        assert np.diff(trend).min() > 0.1    
     
 
 
@@ -86,6 +135,19 @@ class TestConstructDGP:
             extra_params={"n": 10},
         )
         assert len(dgp["p"]) == 10
+        assert len(gt) == 10
+
+    def test_norm_loc_known_var(self):
+        dgp, gt = data_funcs.construct_dgp(
+            m_null=5,
+            m_alt=5,
+            theta0=0.1,
+            theta1=0.2,
+            interleaved=False,
+            hyp_type="norm_loc_known_var",
+            extra_params={"sigma_sq": 1.0},
+        )
+        assert len(dgp["mu"]) == 10
         assert len(gt) == 10
 
     def test_pois(self):
@@ -136,6 +198,21 @@ class TestConstructDGP:
                 interleaved=False,
                 hyp_type="binom",
                 extra_params={"n": 10, "extra": 5},
+            )
+
+    def test_extra_parameter_norm_loc_known_var(self):
+        with pytest.warns():
+            dgp, gt = data_funcs.construct_dgp(
+                m_null=5,
+                m_alt=5,
+                theta0=0.1,
+                theta1=0.2,
+                interleaved=False,
+                hyp_type="norm_loc_known_var",
+                extra_params={
+                    "sigma_sq": 1.0,
+                    "extra":5,
+                },
             )
 
     def test_extraneous_extra_parameter_pois(self):

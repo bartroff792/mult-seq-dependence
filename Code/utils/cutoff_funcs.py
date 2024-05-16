@@ -103,12 +103,37 @@ from scipy.optimize import minimize as scipy_minimize
 
 # FDR controlled pvalue cutoffs and related functions
 FloatArray = NDArray[np.float32]
-HypTypes = Literal["drug", "pois", "binom"]
+HypTypes = Literal["drug", "pois", "binom", "norm_loc_known_var"]
 
 # Define a type of dataframe that contains columns `alpha`, `beta`, `A`, and `B`.
 # Some of those may be full of nulls, but all should be expeted to exist?
 CutoffDF = pd.DataFrame
 
+def construct_base_pvalue_cutoffs(
+    cut_type: Literal["BH", "BY", "BL", "HOLM"], m_total: int, alpha: float
+) -> np.ndarray:
+    """Constructs a base alpha vector for a given FDR control method.
+
+    Args:
+        cut_type: Type of FDR control method. One of "BH", "BY", "BL", "HOLM".
+        m_total: Total number of hypotheses.
+        alpha: Desired FDR level.
+
+    Returns:
+        A vector of alpha cutoffs that control FDR at alpha.
+    """
+    if (cut_type == "BY") or (cut_type == "BL"):
+        alpha_vec_raw = create_fdr_controlled_bl_alpha_indpt(alpha, m_total)
+    elif cut_type == "BH":
+        alpha_vec_raw = alpha * np.arange(1, 1 + m_total) / float(m_total)
+
+    # Holm
+    elif cut_type == "HOLM":
+        alpha_vec_raw = alpha / (float(m_total) - np.arange(m_total))
+    else:
+        raise Exception("Not implemented yet")
+
+    return alpha_vec_raw
 
 def build_cutoff_df(
     alpha: Optional[np.ndarray] = None,
@@ -164,7 +189,8 @@ def guo_rao_stepdown_fdr_level(
         0.0 < alpha_vec
     ), "Alpha vector contains values less than or equal to 0."
     if np.any(1.0 <= alpha_vec):
-        warnings.warn("Alpha vector contains values greater than or equal to 1.")
+        # warnings.warn("Alpha vector contains values greater than or equal to 1.")
+        alpha_vec = np.clip(a=alpha_vec, a_min=0.0, a_max=1.0)
 
     # When number of true nulls is unknown, search over all possible values.
     if m0 is None:
@@ -231,6 +257,7 @@ def apply_fdr_control_to_alpha_vec(
     fdr_level: float,
     alpha_vec: FloatArray,
     m0: Optional[int] = None,
+    eps_tol: float = 1e-5,
 ) -> FloatArray:
     """Scales an alpha vector such that it controls FDR for a stepdown procedure.
 
@@ -250,7 +277,23 @@ def apply_fdr_control_to_alpha_vec(
     ), "Alpha vector contains values less than or equal to 0."
     if m0 is not None:
         assert m0 >= 0, "Number of true null hypotheses must be non-negative."
-    return get_guo_rao_scaling_factor(fdr_level, alpha_vec, m0=m0) * alpha_vec
+    naive_alpha_vec = get_guo_rao_scaling_factor(fdr_level, alpha_vec, m0=m0) * alpha_vec
+    retries = 0
+    max_retrties = 3
+    assert np.all(naive_alpha_vec>0), "Some alphas ended up negative!"
+    while np.any(naive_alpha_vec>1.0) and retries<max_retrties:
+        naive_alpha_vec[naive_alpha_vec>1.0] = 1.0
+        naive_alpha_vec = get_guo_rao_scaling_factor(fdr_level, naive_alpha_vec, m0=m0) * naive_alpha_vec
+        assert np.all(naive_alpha_vec>0), "Some alphas ended up negative!"
+        nominal_fdr = guo_rao_stepdown_fdr_level(naive_alpha_vec, m0=m0)
+        # print(f"on retry {retries} achieved fdr control at {fdr_achieved}")
+        retries += 1
+    naive_alpha_vec[naive_alpha_vec>1.0] = 1.0
+    nominal_fdr = guo_rao_stepdown_fdr_level(naive_alpha_vec, m0=m0)
+    assert nominal_fdr - eps_tol <= fdr_level, "Can't construct alpha with desired FDR!!"
+    verified_alpha_vec = naive_alpha_vec
+    return verified_alpha_vec
+
 
 
 def create_fdr_controlled_bh_alpha_indpt(fdr_level: float, m_hyps: int) -> FloatArray:
@@ -309,11 +352,11 @@ def create_fdr_controlled_bl_alpha_indpt(
         A vector of alpha cutoffs that control FDR at fdr_level for stepdown procedures under independence.
     """
     # Create a matrix for the cases
-    tempmat = np.ones((2, m_hyps))
-    tempmat[1, :] = m_hyps * fdr_level / (m_hyps - np.arange(m_hyps)).astype(float)
-    casevec = tempmat.min(0)
+    unclipped_factors = m_hyps * fdr_level / (m_hyps - np.arange(m_hyps)).astype(float)
+    factors = np.clip(unclipped_factors, a_max=1.0, a_min=-np.inf)
+    print(f"{factors=}")
     # Construct alpha vector
-    alpha_vec = 1.0 - (1.0 - casevec) ** (
+    alpha_vec = 1.0 - (1.0 - factors) ** (
         1.0 / (m_hyps - np.arange(m_hyps)).astype(float)
     )
 
@@ -499,6 +542,8 @@ def pfdr_pfnr_infinite_horizon_pvalue_cutoffs(
     pfnr: float,
     m0: Optional[int] = None,
     epsilon: float = 10.0**-8,
+    max_iters: int=1_000,
+    bound_epsilon: float = 1e-2,
 ) -> Tuple[FloatArray, FloatArray]:
     """pFDR and pFNR controlled pvalue cutoffs for infinite horizon sequential stepdown.
 
@@ -530,30 +575,47 @@ def pfdr_pfnr_infinite_horizon_pvalue_cutoffs(
         ), "Number of true nulls must be in (0, m) for joint pFDR and pFNR control."
         m1 = m - m0
     # Raw alpha and beta vectors
-    alpha_vec0 = alpha_raw_vec
-    beta_vec0 = beta_raw_vec
+    alpha_vec0 = np.clip(alpha_raw_vec, a_min=0, a_max=1)
+    beta_vec0 = np.clip(beta_raw_vec, a_min=0, a_max=1)
     pvalue_cutoff_verifier(alpha_vec0, beta_vec0)
+    assert alpha_vec0[-1]<1, "Largest alpha must be less than 1"
+    assert beta_vec0[-1]<1, "Largest beta must be less than 1"
     # Get pFDR and pFNR control levels using current alpha and beta vectors
     # by first calculating FDR and FNR levels (via Guo+Rao) then scaling those
     # by the (approximate) probability of at least one rejection (or acceptance)
     pfdrx = guo_rao_stepdown_fdr_level(alpha_vec0, m0) / (1 - beta_vec0[-1])
     pfnrx = guo_rao_stepdown_fdr_level(beta_vec0, m1) / (1 - alpha_vec0[-1])
     # Now scale the vectors to ensure control
-    alpha_vec1 = pfdr * alpha_vec0 / pfdrx
-    beta_vec1 = pfnr * beta_vec0 / pfnrx
+    alpha_vec1 = np.clip(pfdr * alpha_vec0 / pfdrx, a_min=0, a_max=1 - bound_epsilon)
+    beta_vec1 = np.clip(pfnr * beta_vec0 / pfnrx, a_min=0, a_max=1 - bound_epsilon)
     # However this adjusts the denominators of the scaling factors pfdrx and
     # pfnrx, meaning the bound may not hold. Repeat this procedure until
     # convergence.
+    iter_counter = 0
     while (
         max(abs(alpha_vec1 - alpha_vec0)) > epsilon
         or max(abs(beta_vec1 - beta_vec0)) > epsilon
     ):
+        iter_counter += 1
+        if iter_counter> max_iters:
+
+            print(f"{alpha_vec1=}")
+            print(f"{beta_vec1=}")
+            raise ValueError("pFDR alpha vec iterative solver exceeded max iters without convergence!")
         alpha_vec0 = copy.copy(alpha_vec1)
         beta_vec0 = copy.copy(beta_vec1)
-        pfdrx = guo_rao_stepdown_fdr_level(alpha_vec0, m0) / (1 - beta_vec0[-1])
-        pfnrx = guo_rao_stepdown_fdr_level(beta_vec0, m1) / (1 - alpha_vec0[-1])
-        alpha_vec1 = pfdr * alpha_vec0 / pfdrx
-        beta_vec1 = pfnr * beta_vec0 / pfnrx
+        
+        assert alpha_vec0[-1]<1, f"Largest alpha must be less than 1 on iter {iter_counter}"
+        assert beta_vec0[-1]<1, f"Largest beta must be less than 1 on iter {iter_counter}"
+        try:
+            pfdrx = guo_rao_stepdown_fdr_level(alpha_vec0, m0) / (1 - beta_vec0[-1])
+            pfnrx = guo_rao_stepdown_fdr_level(beta_vec0, m1) / (1 - alpha_vec0[-1])
+        except Exception as ex:
+            print(f"{alpha_vec0=}")
+            print(f"{beta_vec0=}")
+            raise ValueError(f"Failed on {iter_counter=} with error {ex=}")
+        alpha_vec1 = np.clip(pfdr * alpha_vec0 / pfdrx, a_min=0, a_max=1 - bound_epsilon)
+        beta_vec1 = np.clip(pfnr * beta_vec0 / pfnrx, a_min=0, a_max=1 - bound_epsilon)
         logging.debug(
             "Rej alpha log range: {0}\nAcc beta log range: {1}".format(
                 np.log10(max(abs(alpha_vec1 - alpha_vec0))),
@@ -681,6 +743,12 @@ def importance_sample_interpolation_helper(
         sim_theta = np.exp(
             imp_sample_prop * np.log(theta1) + (1.0 - imp_sample_prop) * np.log(theta0)
         )
+        sim_params = copy.deepcopy(param0)
+        sim_params["mu"] = sim_theta
+    elif hyp_type == "norm_loc_known_var":
+        theta0 = param0["mu"]
+        theta1 = param1["mu"]
+        sim_theta = imp_sample_prop * theta1 + (1.0 - imp_sample_prop) * theta0
         sim_params = copy.deepcopy(param0)
         sim_params["mu"] = sim_theta
     elif hyp_type == "gaussian":
@@ -910,140 +978,6 @@ def estimate_finite_horizon_rejective_llr_cutoffs(
     return cutoff_levels
 
 
-# ALPHA_SHIFT = 0.0
-
-
-# def empirical_quant_presim_wrapper(kwargs):
-#     stream_specific_cutoff_levels = []
-#     record = kwargs["record"]
-#     weights = kwargs["weights"]
-#     alpha_levels = kwargs["alpha_levels"]
-#     if "no_left_extrapolate" in kwargs:
-#         left = np.NaN
-#     else:
-#         left = None
-
-#     range_iter = range(record.shape[1])
-
-#     if ("job_id" not in kwargs) or (kwargs["job_id"] == 0):
-#         range_iter = tqdm(range_iter, desc="Per stream quantile estimation")
-
-#     for stream_num in range_iter:
-#         stream_record_raw = record[:, stream_num]
-#         stream_weight_raw = weights[:, stream_num]
-#         stream_idx = np.argsort(stream_record_raw)
-#         stream_record = stream_record_raw[stream_idx]
-#         stream_weight = stream_weight_raw[stream_idx] / stream_weight_raw.sum()
-#         stream_cdf = stream_weight.cumsum() - ALPHA_SHIFT * stream_weight[0]
-
-#         stream_cutoffs = np.interp(
-#             1.0 - alpha_levels, stream_cdf, stream_record, left=left, right=np.NaN
-#         )
-#         if np.isnan(stream_cutoffs).any():
-#             print("RAW ", stream_weight[0])
-#             print(
-#                 "Stream min {0} stream max {1}".format(
-#                     stream_cdf.min(), stream_cdf.max()
-#                 )
-#             )
-#             print(
-#                 "alpha min {0} alpha max {1}".format(
-#                     (1.0 - alpha_levels).min(), (1.0 - alpha_levels).max()
-#                 )
-#             )
-#             raise ValueError("NaN found in stream cutoffs.")
-
-#         stream_specific_cutoff_levels.append(stream_cutoffs)
-#     stream_specific_cutoff_levels = np.array(stream_specific_cutoff_levels).T
-#     return stream_specific_cutoff_levels
-
-
-
-# def llr_term_moments(drr: pd.Series, p0: float, p1: float) -> pd.DataFrame:
-#     """Expectation of the llr terms for a drug sim  under the null hypothesis for each step.
-
-#     Used for calculating finite horizon cutoffs via gaussian approximation of
-#     the llr statistic path. Assumes temporal independence and thus a simple
-#     hypothesis.
-
-#     Args:
-#         drr (pd.Series): drug use rate. Informs how many samples should be
-#             expected at each step.
-#         p0 (float): null hypothesis probability.
-#         p1 (float): alternative hypothesis probability.
-
-#     Returns:
-#         pd.DataFrame: with two columns:
-#             term_mean: the expected value of an individual term's (or stage's)
-#             contribution to the llr statistic
-#             term_var: variance of each term's contribution.
-#     """
-#     term_mean = drr * (p0 * np.log(p1 / p0) + (1 - p0) * np.log((1 - p1) / (1 - p0)))
-#     term_var = drr * (
-#         p0 * np.log(p1 / p0) ** 2.0 + (1 - p0) * np.log((1 - p1) / (1 - p0)) ** 2.0
-#     )
-#     return pd.DataFrame({"term_mean": term_mean, "term_var": term_var})
-
-
-# def llr_binom_term_moments(p0: pd.Series, p1: pd.Series) -> pd.DataFrame:
-#     """Calculates mean and variance of single-example binomial llr terms.
-
-#     Args:
-#         p0 (pd.Series): null hypothesis probability.
-#         p1 (pd.Series): alternative hypothesis probability.
-
-#     Returns:
-#         pd.DataFrame: contains two columns:
-#             team_mean: mean of the llr terms.
-#             term_var: variance of the llr terms.
-#     """
-#     const_a = np.log((1 - p1) / (1 - p0))
-#     const_b = np.log(p1 / p0) - np.log((1 - p1) / (1 - p0))
-#     eX = p0
-#     varX = p0 * (1 - p0)
-#     term_mean = const_a + const_b * eX
-#     term_var = (const_b**2.0) * varX
-#     return pd.DataFrame({"term_mean": term_mean, "term_var": term_var})
-
-
-# def llr_pois_term_moments(lam0: pd.Series, lam1: pd.Series) -> pd.DataFrame:
-#     """Calculates mean and variance of one step for a poisson llr.
-
-#     Args:
-#         lam0 (pd.Series): null hypothesis rate.
-#         lam1 (pd.Series): alternative hypothesis rate.
-
-#     Returns:
-#         pd.DataFrame: contains two columns:
-#             team_mean: mean of the llr terms.
-#             term_var: variance of the llr terms.
-#     """
-#     const_a = -(lam1 - lam0)
-#     const_b = np.log(lam1 / lam0)
-#     eX = lam0
-#     varX = lam0
-#     term_mean = const_a + const_b * eX
-#     term_var = (const_b**2.0) * varX
-#     return pd.DataFrame({"term_mean": term_mean, "term_var": term_var})
-
-
-# Var(aX+bY) = a**2 VarX + b**2 VarY + 2ab CovXY
-# def est_sample_size(alpha, beta, drr, p0, p1, BH=True):
-#    N_drugs = len(drr)
-#    # First come up with p-value cutoffs
-#    # BH
-#    if BH:
-#        alpha_vec_raw = alpha * np.arange(1, 1+N_drugs) / float(N_drugs)
-#    # Holm
-#    else:
-#        alpha_vec_raw = alpha / (float(N_drugs) - np.arange(N_drugs))
-#
-#    alpha_vec = create_fdr_controlled_alpha(alpha, alpha_vec_raw)
-#    beta_vec = create_fdr_controlled_alpha(beta, alpha_vec_raw)
-#    A_vec, B_vec = calculate_mult_sprt_cutoffs(alpha_vec, beta_vec)
-#    return (max(A_vec * alpha_vec[::-1]) + max(-B_vec * beta_vec[::-1])) / abs(llr_term_moments(drr, p0, p1)["term_mean"]).max()
-
-
 # From govindarajulu. Expected stopping times for a single hypothesis
 def single_hyp_sequential_expected_acceptance_time(
     A: float, B: float, mu_1: float
@@ -1116,6 +1050,15 @@ def llr_term_mean_general(
         const_a = np.log(params1["p"] / params0["p"])
         const_b = np.log((1 - params1["p"]) / (1 - params0["p"]))
         term_mean = const_a * eX + const_b * (params0["n"] - eX)
+        return term_mean
+    elif hyp_type == "norm_loc_known_var":
+        mu0 = params0["mu"]
+        mu1 = params1["mu"]
+        sigma_sq = params0["sigma_sq"]
+        const_a = ((mu0 **2.0) - (mu1 ** 2.0)) / (2 * sigma_sq)
+        const_b = (mu1 - mu0) / sigma_sq
+        eX = mu0
+        term_mean = const_a + const_b * eX
         return term_mean
     else:
         raise ValueError("Unknown type {0}".format(hyp_type))
@@ -1203,174 +1146,118 @@ def est_sample_size(
     return max((max_expected_acceptance_time, max_expected_rejection_time))
 
 
-# def est_sample_size(
-#     A_vec: FloatArray,
-#     B_vec: FloatArray,
-#     theta0: pd.Series,
-#     theta1: pd.Series,
-#     hyp_type: Optional[HypTypes] = "drug",
-#     extra_params: Optional[Dict[str, Any]] = None,
-# ) -> int:
-#     """Estimate the sample size needed to accept or reject all hypotheses.
-
-#     in general, very conservative. Calculates expected rejection and
-#     acceptance times for the worst case cutoffs and worst case
-#     hypotheses, then takes the worst of the two. The expectation could
-#     be misleading, but given the pairing of worst case hypothesis with
-#     worst case cutoff, unlikely to underestimate.
-
-
-#     Args:
-#         A_vec (np.array):   A_vec[i] is the rejective?? cutoff for the ith hypothesis
-#         B_vec (np.array):   B_vec[i] is the acceptive?? cutoff for the ith hypothesis
-#         drr (pd.Series):    drug use rate series for drug hyptotheses
-#         p0 (float):         The null hypothesis probability (or poisson rate if hyp_type is "pois")
-#         p1 (float):         The alternative hypothesis probability (or poisson rate if hyp_type is "pois")
-#         hyp_type (str):     The type of hypothesis test to use.  One of "drug", "pois", or "binom"
-
-#     Returns:
-#         int: The estimated sample size needed to accept or reject all hypotheses
-#     """
-#     if (hyp_type is None) or (hyp_type == "drug"):
-#         negative_drift_under_null = llr_term_moments(drr, p0, p1)["term_mean"]
-#         positive_drift_under_alt = -llr_term_moments(drr, p1, p0)["term_mean"]
-#     elif hyp_type == "pois":
-#         negative_drift_under_null = llr_pois_term_moments(np.array([p0]), np.array([p1]))["term_mean"]
-#         positive_drift_under_alt = -llr_pois_term_moments(np.array([p1]), np.array([p0]))["term_mean"]
-#     elif hyp_type == "binom":
-#         negative_drift_under_null = llr_binom_term_moments(np.array([p0]), np.array([p1]))["term_mean"]
-#         positive_drift_under_alt = -llr_binom_term_moments(np.array([p1]), np.array([p0]))["term_mean"]
-#     else:
-#         raise ValueError("Unknown type {0}".format(hyp_type))
-#     # Get slowest drifting hypotheses, ie worst case.
-#     mu_0 = (negative_drift_under_null).max()
-#     mu_1 = (positive_drift_under_alt).min()
-#     # Get the most extreme cutoffs
-#     most_extreme_rej_cutoff = A_vec[0]
-#     most_extreme_acc_cutoff = B_vec[0]
-#     # Get expected stopping time for absolute worst case rej and acc
-#     max_expected_acceptance_time = single_hyp_sequential_expected_acceptance_time(
-#         most_extreme_rej_cutoff,
-#         most_extreme_acc_cutoff,
-#         mu_1,
-#         )
-#     max_expected_rejection_time = single_hyp_sequential_expected_rejection_time(
-#         most_extreme_rej_cutoff,
-#         most_extreme_acc_cutoff,
-#         mu_0,
-#         )
-#     # Take the worst of those.
-#     return max((max_expected_acceptance_time, max_expected_rejection_time))
-
-
 # Importance sampling section
 
 
-def imp_sample_drug_weight(
-    counts: Tuple[pd.DataFrame, pd.DataFrame],
-    p0: Union[float, pd.Series],
-    p1: Union[float, pd.Series],
-    drr0: Union[float, pd.Series, None] = None,
-    drr1: Union[float, pd.Series, None] = None,
-) -> pd.Series:
-    """Calculates the ratio of the likelihood of hte null and importance distributions
+# def imp_sample_drug_weight(
+#     counts: Tuple[pd.DataFrame, pd.DataFrame],
+#     p0: Union[float, pd.Series],
+#     p1: Union[float, pd.Series],
+#     drr0: Union[float, pd.Series, None] = None,
+#     drr1: Union[float, pd.Series, None] = None,
+# ) -> pd.Series:
+#     """Calculates the ratio of the likelihood of hte null and importance distributions
 
-    The model is, as elsewhere, that there is an overall sideeffect rate with a
-    proportion of those side effects being amnesia reports
+#     The model is, as elsewhere, that there is an overall sideeffect rate with a
+#     proportion of those side effects being amnesia reports
 
-    When only counts, p0, and p1 are passed, this func assumes the overall side
-    effect rate under the null and importance distributions are the same, and
-    that they wash out in the weight, so it can be treated as a simple binomial.
+#     When only counts, p0, and p1 are passed, this func assumes the overall side
+#     effect rate under the null and importance distributions are the same, and
+#     that they wash out in the weight, so it can be treated as a simple binomial.
 
-    When drr0 and drr1 are passed in addition to the first three arguments, the
-    full poisson distribution is considered.
+#     When drr0 and drr1 are passed in addition to the first three arguments, the
+#     full poisson distribution is considered.
 
-    p0, p1, drr0, and drr1 can be floats if constant across MC reps, or Series
-    if they differ across reps.
+#     p0, p1, drr0, and drr1 can be floats if constant across MC reps, or Series
+#     if they differ across reps.
 
-    Args:
-        counts: tuple of amnesia and non-amensia count dataframes for all MC sims.
-            columns are ... TODO
-        p0: null probability of a side effect report being amnesia.
-        p1: importance sampling distribution probabilty of a side effect being amnesia
-        drr0: optional overall reaction rate for the drug under the null
-        drr1: optional overall reaction rate for the drug under the importance
-            sampling distribution.
+#     Args:
+#         counts: tuple of amnesia and non-amensia count dataframes for all MC sims.
+#             columns are ... TODO
+#         p0: null probability of a side effect report being amnesia.
+#         p1: importance sampling distribution probabilty of a side effect being amnesia
+#         drr0: optional overall reaction rate for the drug under the null
+#         drr1: optional overall reaction rate for the drug under the importance
+#             sampling distribution.
 
-    Retruns:
-        pandas series of weights for each MC simulation.
+#     Retruns:
+#         pandas series of weights for each MC simulation.
 
-    """
-    # Get final outcomes from both amnesia and non-amnesia reactions
-    # for each MC rep. These are both series.
-    amcount = counts[0].iloc[-1, :]  # Final step is all thats important
-    nonamcount = counts[1].iloc[-1, :]
-    # Calculate the main parameter terms in the likelihood ratio.
-    am_factor = p0 / p1
-    nonam_factor = (1 - p0) / (1 - p1)
-    # Calculate likelihood ratio for binomial.
-    log_weight = amcount * np.log(am_factor) + nonamcount * np.log(nonam_factor)
-    raw_weight = np.exp(log_weight)
-    if np.isnan(raw_weight).any():
-        logger = logging.getLogger()
-        logger.debug("NaN weights: {0}".format(raw_weight[np.isnan(raw_weight)]))
-        logger.debug("Log weights: {0}".format(log_weight[np.isnan(raw_weight)]))
+#     """
+#     # Get final outcomes from both amnesia and non-amnesia reactions
+#     # for each MC rep. These are both series.
+#     amcount = counts[0].iloc[-1, :]  # Final step is all thats important
+#     nonamcount = counts[1].iloc[-1, :]
+#     # Calculate the main parameter terms in the likelihood ratio.
+#     am_factor = p0 / p1
+#     nonam_factor = (1 - p0) / (1 - p1)
+#     # Calculate likelihood ratio for binomial.
+#     log_weight = amcount * np.log(am_factor) + nonamcount * np.log(nonam_factor)
+#     raw_weight = np.exp(log_weight)
+#     if np.isnan(raw_weight).any():
+#         logger = logging.getLogger()
+#         logger.debug("NaN weights: {0}".format(raw_weight[np.isnan(raw_weight)]))
+#         logger.debug("Log weights: {0}".format(log_weight[np.isnan(raw_weight)]))
 
-    # TODO: check this formula and describe it in detail.
-    if drr0 is not None and drr1 is not None:
-        # Number of periods
-        T = counts[0].shape[0]
-        weight = (
-            raw_weight
-            * ((drr0 / drr1).astype("float128") ** (amcount + nonamcount))
-            * np.exp(-T * (drr0 - drr1)).astype("float128")
-        )
-    if ((drr0 is None) and (drr1 is not None)) or (
-        (drr0 is not None) and (drr1 is None)
-    ):
-        raise ValueError(
-            "Either both drug response rates should be passed, or "
-            "niether, for calculating importance sampling weights"
-        )
-    else:
-        weight = raw_weight
-    return weight
-
-
-def imp_sample_binom_weight(counts: pd.DataFrame, p0: float, p1: float) -> pd.Series:
-    """Calculates likelihood ratio importance sampling wieghts for finite horizon MC reps for binomial model.
-
-    Assumes each step is a bernoulli. TODO: consider chaning that??
-
-    Args:
-        counts (Tuple[pd.DataFrame, pd.DataFrame]): _description_
-        p0 (float): _description_
-        p1 (float): _description_
-
-    Returns:
-        pd.Series: _description_
-    """
-    # Gets seires of
-    n_flips = counts.shape[0]
-    success_ser = counts.iloc[-1, :]  # Final step is all thats important
-    fail_ser = n_flips - success_ser
-    # Calculate parameter terms in likelihood ratio.
-    event_factor = p0 / p1
-    fail_factor = (1 - p0) / (1 - p1)
-    # Compute likelihood ratio weights.
-    log_weight = success_ser * np.log(event_factor) + fail_ser * np.log(fail_factor)
-    return np.exp(log_weight)
+#     # TODO: check this formula and describe it in detail.
+#     if drr0 is not None and drr1 is not None:
+#         # Number of periods
+#         T = counts[0].shape[0]
+#         weight = (
+#             raw_weight
+#             * ((drr0 / drr1).astype("float128") ** (amcount + nonamcount))
+#             * np.exp(-T * (drr0 - drr1)).astype("float128")
+#         )
+#     if ((drr0 is None) and (drr1 is not None)) or (
+#         (drr0 is not None) and (drr1 is None)
+#     ):
+#         raise ValueError(
+#             "Either both drug response rates should be passed, or "
+#             "niether, for calculating importance sampling weights"
+#         )
+#     else:
+#         weight = raw_weight
+#     return weight
 
 
-def imp_sample_pois_weight(counts, p0, p1):
-    events = counts.iloc[-1, :]  # Final step is all thats important
-    n = counts.shape[0]
-    factor = p0 / p1
-    # irrelevant factor
-    # stupid = np.exp(-counts.shape[0]*(po - p1))
-    log_weight = events * np.log(factor) - n * (p0 - p1)
-    return np.exp(log_weight)
+# def imp_sample_binom_weight(counts: pd.DataFrame, p0: float, p1: float) -> pd.Series:
+#     """Calculates likelihood ratio importance sampling wieghts for finite horizon MC reps for binomial model.
+
+#     Assumes each step is a bernoulli. TODO: consider chaning that??
+
+#     Args:
+#         counts (Tuple[pd.DataFrame, pd.DataFrame]): _description_
+#         p0 (float): _description_
+#         p1 (float): _description_
+
+#     Returns:
+#         pd.Series: _description_
+#     """
+#     # Gets seires of
+#     n_flips = counts.shape[0]
+#     success_ser = counts.iloc[-1, :]  # Final step is all thats important
+#     fail_ser = n_flips - success_ser
+#     # Calculate parameter terms in likelihood ratio.
+#     event_factor = p0 / p1
+#     fail_factor = (1 - p0) / (1 - p1)
+#     # Compute likelihood ratio weights.
+#     log_weight = success_ser * np.log(event_factor) + fail_ser * np.log(fail_factor)
+#     return np.exp(log_weight)
 
 
-def imp_sample_gaussian_weight(counts, p0, p1, drr):
-    raise Exception("Not implemented yet. Composite or simple? SD or VAR?")
+# def imp_sample_pois_weight(counts, p0, p1):
+#     events = counts.iloc[-1, :]  # Final step is all thats important
+#     n = counts.shape[0]
+#     factor = p0 / p1
+#     # irrelevant factor
+#     # stupid = np.exp(-counts.shape[0]*(po - p1))
+#     log_weight = events * np.log(factor) - n * (p0 - p1)
+#     return np.exp(log_weight)
+
+
+# def imp_sample_gaussian_weight(counts, p0, p1, drr):
+#     raise Exception("Not implemented yet. Composite or simple? SD or VAR?")
+
+
+
+

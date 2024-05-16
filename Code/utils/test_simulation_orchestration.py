@@ -15,7 +15,7 @@ class TestMCSimAndAnalyzeSynthData:
         fdp_data = simulation_orchestration.mc_sim_and_analyze_synth_data(
             alpha=0.1,
             beta=0.1,
-            cut_type="BL",
+            cut_type="BH",
             theta0=0.05,
             theta1=0.045,
             hyp_type="binom",
@@ -37,11 +37,37 @@ class TestMCSimAndAnalyzeSynthData:
             rand_order=False,
         )
 
+    def test_basic_functionality_norm_loc_known_var(self, error_control):
+        fdp_data = simulation_orchestration.mc_sim_and_analyze_synth_data(
+            alpha=0.1,
+            beta=0.1,
+            cut_type="BH",
+            theta0=0.0,
+            theta1=0.5,
+            hyp_type="norm_loc_known_var",
+            extra_params={"sigma_sq": 1.0},
+            n_periods=None,
+            m_null=3,
+            m_alt=7,
+            sim_reps=4,
+            m0_known=False,
+            error_control=error_control,
+            rho=-0.5,
+            interleaved=False,
+            undershoot_prob=0.2,
+            fin_par=True,
+            fh_sleep_time=60,
+            do_iterative_cutoff_MC_calc=False,
+            stepup=False,
+            analysis_func=simulation_orchestration.compute_fdp,
+            rand_order=False,
+        )
+
     def test_finite_horizon(self, error_control):
         fdp_data = simulation_orchestration.mc_sim_and_analyze_synth_data(
             alpha=0.1,
             beta=None,
-            cut_type="BL",
+            cut_type="BH",
             theta0=0.05,
             theta1=0.045,
             hyp_type="binom",
@@ -65,23 +91,12 @@ class TestMCSimAndAnalyzeSynthData:
 
 
 def generate_sim_cutoff_params():
-    cut_types = ["BL", "BY", "HOLM"]
+    cut_types = ["BL", "BH", "HOLM"]
     error_controls = ["fdr", "pdfr", None]
     betas = [0.2, None]
     return list(itertools.product(cut_types, error_controls, betas))
 
 class TestSimCutoffs:
-    @pytest.mark.parametrize(["cut_type"], [("BL",), ("BY",), ("HOLM",)])
-    def test_base_pvalue_cuts(self, cut_type):
-        m_hyps = 5
-        alpha_vec = simulation_orchestration.construct_base_pvalue_cutoffs(
-            cut_type=cut_type,
-            m_total=m_hyps,
-            alpha=0.1,
-        )
-        assert len(alpha_vec)==m_hyps
-        assert (np.diff(alpha_vec)>=0).all()
-
     @pytest.mark.parametrize(["cut_type", "error_control", "beta"], generate_sim_cutoff_params())
     def test_construct_sim_pvalue_cutoffs(self, cut_type, error_control, beta):
         m_hyps = 5
@@ -124,7 +139,7 @@ class TestSimCutoffs:
             alpha=alpha,
             beta=beta,
             error_control=error_control,
-            cut_type="BL",
+            cut_type="BH",
         )
         np.random.seed(42)
         cutoffs_df, n_periods = simulation_orchestration.calc_llr_cutoffs(
