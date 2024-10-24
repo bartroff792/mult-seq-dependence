@@ -36,13 +36,13 @@ Taking
 Then define the Guo+Rao FDR bound for a stepdown procedure to be
 
 $$
-D(m_{0},m_{1},\vec{\alpha})=m_{0}\left(\sum_{j=1}^{m_{1}+1}\frac{\alpha_{j}-\alpha_{j-1}}{j}+\sum_{j=m_{1}+2}^{m}\frac{m_{1}(\alpha_{j}-\alpha_{j-1})}{j(j-1)}\right)
+D(m_{0},m_{1},\vec{\alpha})=m_{0}(\sum_{j=1}^{m_{1}+1}\frac{\alpha_{j}-\alpha_{j-1}}{j}+\sum_{j=m_{1}+2}^{m}\frac{m_{1}(\alpha_{j}-\alpha_{j-1})}{j(j-1)})
 $$
 
 when $m_{0}$ (and $m_{1}$) are known, and
 
 $$
-D(\vec{\alpha}) = \max_{m_{0}\in \left\{1,...,m\right\}} D\left(m_{0}, m - m_{0}, \vec{\alpha}\right)
+D(\vec{\alpha}) = \max_{m_{0}\in \{1,...,m\}} D(m_{0}, m - m_{0}, \vec{\alpha})
 $$
 
 when they're unknown.
@@ -61,10 +61,10 @@ $$
 $$
 provides the type 1 error bound
 $$
-fdr\leq D\left(\vec{\alpha}\right)
+fdr\leq D(\vec{\alpha})
 $$
 under the true distribution, regardless of the dependence structure,
-where $D\left(\vec{\alpha}\right)$ is defined as in Equation \ref{eq:fdr-d-func}.
+where $D(\vec{\alpha})$ is defined as in Equation \ref{eq:fdr-d-func}.
 
 ## THM Infinite Horizon $fdr$ and $fnr$ Control
 
@@ -96,8 +96,8 @@ $$
 fnr\leq D(\vec{\beta}).
 $$
 
-Again, $D\left(\vec{\alpha}\right)$ is defined as in Equation \ref{eq:fdr-d-func},
-and $D\left(\vec{\beta}\right)$ is the same function applied to the
+Again, $D(\vec{\alpha})$ is defined as in Equation \ref{eq:fdr-d-func},
+and $D(\vec{\beta})$ is the same function applied to the
 type 2 marginal constraints vector.
 \end{thm}
 These theorems allow for construction of $fdr$ and $fnr$ controlling
@@ -121,22 +121,36 @@ true null hypotheses and $m_{1}$ false null hypotheses, regardless
 of the dependence structure:
 
 $$
-pfdr\leq D\left(m_{0},m_{1},\vec{\alpha}/P\left(R>0\right)\right)=D\left(m_{0},m_{1},\vec{\alpha}\right)/P\left(R>0\right).
+pfdr\leq D(m_{0},m_{1},\vec{\alpha}/P(R>0))=D(m_{0},m_{1},\vec{\alpha})/P(R>0).
 $$
 
 Further, we also have
 
 $$
-pfdr\leq\frac{D\left(m_{0},m_{1},\vec{\alpha}\right)}{\max_{1\leq i\leq m}P\left(\exists t<T\,\text{ st }\,\Lambda^{i}(t)\geq A_{1}\right)}\leq\frac{D\left(m_{0},m_{1},\vec{\alpha}\right)}{\min_{1\leq i\leq m}P\left(\exists t<T\,\text{ st }\,\Lambda^{i}(t)\geq A_{1}\right)}.
+pfdr 
+\leq
+\frac{
+    D(m_{0},m_{1},\vec{\alpha})
+    }{
+    \max_{1\leq i\leq m}
+        P(\exists t<T\,\text{ st }\,\Lambda^{i}(t)\geq A_{1})
+    }
+\leq
+\frac{
+    D(m_{0},m_{1},\vec{\alpha})
+    }{
+    \min_{1\leq i\leq m}
+        P(\exists t<T\,\text{ st }\,\Lambda^{i}(t)\geq A_{1})
+    }.
 $$
 
 ## THM: $pfdr$ and $pfnr$ Control for Infinite Horizon
 
-In the finite horizon, rejective procedure, the quantity $P\left(R>0\right)$
+In the finite horizon, rejective procedure, the quantity $P(R>0)$
 is equivalent to
 
 $$
-P\left(\exists i\in 1,...,m,\,t<T\,\text{ st }\,\Lambda^{i}\left(t\right)\geq A_{1}\right),
+P(\exists i\in 1,...,m,\,t<T\,\text{ st }\,\Lambda^{i}(t)\geq A_{1}),
 $$
 
 and depends on the procedure and cutoffs. The implications of this
@@ -155,15 +169,15 @@ true null hypotheses and $m_{1}$ false null hypotheses, regardless
 of the dependence structure:
 
 $$\begin{aligned}
-pfdr & \leq D\left(m_{0},m_{1},\frac{\vec{\alpha}}{P\left(R>0\right)}\right)\\
- & \leq\frac{D\left(m_{0},m_{1},\vec{\alpha}\right)}{\max_{1\leq i\leq m}P\left(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\geq A_{1},\,\forall t^{\prime}<t\,\Lambda^{i}(t^{\prime})>B_{m}\right)}\\
- & \leq\frac{D\left(m_{0},m_{1},\vec{\alpha}\right)}{P\left(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\geq A_{1},\,\forall t^{\prime}<t\,\Lambda^{i}(t^{\prime})>B_{m}\right)}\quad\forall i\in 1,...,m,
+pfdr & \leq D(m_{0},m_{1},\frac{\vec{\alpha}}{P(R>0)})\\
+ & \leq\frac{D(m_{0},m_{1},\vec{\alpha})}{\max_{1\leq i\leq m}P(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\geq A_{1},\,\forall t^{\prime}<t\,\Lambda^{i}(t^{\prime})>B_{m})}\\
+ & \leq\frac{D(m_{0},m_{1},\vec{\alpha})}{P(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\geq A_{1},\,\forall t^{\prime}<t\,\Lambda^{i}(t^{\prime})>B_{m})}\quad\forall i\in 1,...,m,
 \end{aligned}$$
 
 $$\begin{aligned}
-pfnr & \leq D\left(m_{1},m_{0},\frac{\vec{\beta}}{P\left(R^{\prime}>0\right)}\right)\\
- & \leq\frac{D\left(m_{1},m_{0},\vec{\beta}\right)}{\max_{1\leq i\leq m}P\left(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\leq B_{1},\,\forall t^{\prime}<t\,\Lambda^{i}(t^{\prime})<A_{m}\right)}\\
- & \leq\frac{D\left(m_{1},m_{0},\vec{\beta}\right)}{P\left(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\leq B_{1},\,\forall t^{\prime}<t\,\Lambda^{i}(t^{\prime})<A_{m}\right)}\quad\forall i\in 1,...,m.
+pfnr & \leq D(m_{1},m_{0},\frac{\vec{\beta}}{P(R^{\prime}>0)})\\
+ & \leq\frac{D(m_{1},m_{0},\vec{\beta})}{\max_{1\leq i\leq m}P(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\leq B_{1},\,\forall t^{\prime}<t\,\Lambda^{i}(t^{\prime})<A_{m})}\\
+ & \leq\frac{D(m_{1},m_{0},\vec{\beta})}{P(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\leq B_{1},\,\forall t^{\prime}<t\,\Lambda^{i}(t^{\prime})<A_{m})}\quad\forall i\in 1,...,m.
 \end{aligned}$$
 
 Note that in the case of a simple vs. simple SPRT with both $m_{1}>0$
@@ -172,7 +186,7 @@ of the bounds above
 
 $$
 P_{H_{0}^{i}}(\exists t<\infty\text{ st }\Lambda^{i}(t)\leq B_{1},\forall t^{\prime}<t\quad\Lambda^{i}(t^{\prime})<A_{m})\\
-=1-P_{H_{0}^{i}}(\left(\forall t<\infty\quad\Lambda^{i}(t)>B_{1}\right)\,\cup\,\left(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\geq A_{m},\,\forall t^{\prime}<t\quad\Lambda^{i}(t^{\prime})>B_{1}\right))\\
+=1-P_{H_{0}^{i}}((\forall t<\infty\quad\Lambda^{i}(t)>B_{1})\,\cup\,(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\geq A_{m},\,\forall t^{\prime}<t\quad\Lambda^{i}(t^{\prime})>B_{1}))\\
 =1-P_{H_{0}^{i}}(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\geq A_{m},\,\forall t^{\prime}<t\,\Lambda^{i}(t^{\prime})>B_{1})\approx1-\alpha_{m}.
 $$
 
