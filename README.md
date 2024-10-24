@@ -1,19 +1,25 @@
 # Sequential Testing of Multiple Hypotheses
-Extremely broken at the moment. We're working on it!
 
-# Structure
-The only parts that are close to functional are in the Code/utils directory.
-They inlcude
+This package serves two main purposes:
 
-* `cutoff_funcs`: functions for building vectors of p-value cutoffs and log likelihood ratio cutoffs for sequential testing procedures
-* `data_funcs`: Funcs for reading drug data, generating fake data, generating hypotheses, and computing llr paths.
-* `simulation_orchestration`: This module contains functions for higher level simulation for sequential testing of multiple hypotheses (beyond just generating the observations), and executing the SPRT procedures on it.
-* `sim_analysis`: consider this broken... still trying to remember what this does. most functions are basically undocumented
-* `common_funcs`: not much other that a function for chunking lists of jobs
+* Can be used as a library to run sequential stepdown and sequential step-up tests on user provided data/data-streams.
+* Can be used to run a wide array simulations of applying the procedures to simple, synthetic data generating processes where the true parameter values are known.
 
-Outside of that, the smattering of .pys in the main Code dir mostly run sets of simulations, generate plots and dump them, though they're all a mess. The only other module to look at at the moment is the `visualizations.py` module.
+## Library
 
-Under `Data`, we have 
+All major python modules are in the `Code/utils` dir.
+
+* `cutoff_funcs.py`: functions for building vectors of p-value cutoffs and log likelihood ratio cutoffs for sequential testing procedures
+* `multseq.py`: actual testing procedure
+* `data_funcs.py`: defines interfaces for streaming data.
+
+## Simulation
+
+* `data_funcs.py`: Funcs for reading drug data, generating fake data, generating hypotheses, and computing llr paths.
+* `simulation_orchestration.py`: This module contains functions for higher level simulation for sequential testing of multiple hypotheses (beyond just generating the observations), and executing the SPRT procedures on it.
+* `docker_main.py`: launches a simulation run on google cloud platform. Located outside of the `utils` dir.
+
+### Demo Data
 
 * `AmnesiaRateClean.csv`: a table of drugs, each with the (annual) rate at which they've "generated" amnesia side effect reports, as well as the rate at which they've generated non-amnesia side effect reports. We recommend using their total side effect generation rate as a proxy for their usage.
 * `GoogleSearchHitData.csv`: a table of drugs search popularity, and the proportion of those searches that include "amnesia". The popularity and naming schemes of drugs differ, so some of these may be of higher than expected variance. Further, many drugs' search rates weren't available.
@@ -21,20 +27,24 @@ Under `Data`, we have
 
 # BL scaling
 
+Taking
 
-Taking 
 * $m_{0}$ to be the number of true null hypotheses
 * $m_{1}$ to be the number of false null hypotheses
 * $\vec{\alpha}=(\alpha_{1}, \alpha_{2}, ... \alpha_{m_{0}+ m_{1}})$ to be the vector of p-value cutoffs such that $\alpha_{j}\leq \alpha_{j+1}$
 
-Then define the Guo+Rao FDR bound for a stepdown procedure to be  
+Then define the Guo+Rao FDR bound for a stepdown procedure to be
+
 $$
 D(m_{0},m_{1},\vec{\alpha})=m_{0}\left(\sum_{j=1}^{m_{1}+1}\frac{\alpha_{j}-\alpha_{j-1}}{j}+\sum_{j=m_{1}+2}^{m}\frac{m_{1}(\alpha_{j}-\alpha_{j-1})}{j(j-1)}\right)
 $$
-when $m_{0}$ (and $m_{1}$) are known, and 
+
+when $m_{0}$ (and $m_{1}$) are known, and
+
 $$
 D(\vec{\alpha}) = \max_{m_{0}\in \left\{1,...,m\right\}} D\left(m_{0}, m - m_{0}, \vec{\alpha}\right)
 $$
+
 when they're unknown.
 
 # Main Theorems
@@ -44,12 +54,12 @@ when they're unknown.
 The finite horizon, rejective sequential step-down procedure described
 in Algorithm \ref{alg:Finite-Horizon-Rejective} with $\alpha$ cutoffs
 as in Equation \ref{eq:alpha-cutoffs} and cutoffs $A_{j}$ as specified
-in Equation \ref{eq:rejective-cutoffs} satisfying 
+in Equation \ref{eq:rejective-cutoffs} satisfying
 
 $$
 \forall i\leq m,\theta\in H_{0}^{i}\quad P_{\theta}(\exists t<T\text{ s.t. }\Lambda^{i}(t)\geq A_{j})\leq\alpha_{j}
 $$
-provides the type 1 error bound 
+provides the type 1 error bound
 $$
 fdr\leq D\left(\vec{\alpha}\right)
 $$
@@ -59,14 +69,13 @@ where $D\left(\vec{\alpha}\right)$ is defined as in Equation \ref{eq:fdr-d-func}
 ## THM Infinite Horizon $fdr$ and $fnr$ Control
 
 The infinite horizon variant is similar, but requires slightly different
-marginal inequalities and provides type 2 error control as well. 
-
+marginal inequalities and provides type 2 error control as well.
 
 The infinite horizon, acceptive-rejective sequential step-down procedure
 described in Algorithm \ref{alg:Full-SSD} with $\vec{\alpha}$ and
 $\vec{\beta}$ satisfying Equation \ref{eq:alpha-cutoffs} (and an
 equivalent for type 2 error) and $A_{j}$'s and $B_{j}$'s as in Equations
-\ref{eq:rejective-cutoffs} and \ref{eq:acceptance-cutoffs} satisfying 
+\ref{eq:rejective-cutoffs} and \ref{eq:acceptance-cutoffs} satisfying
 
 $$
 \forall i\leq m,\,j\leq m,\theta\in H_{0}^{i}\quad P_{\theta}(\exists t<\infty\text{ st }\Lambda^{i}(t)\geq A_{j}\,\cap\,\forall t^{\prime}<t\quad\Lambda(t^{\prime})>B_{1})\leq\alpha_{j}
@@ -99,6 +108,7 @@ approximations discussed in Section \ref{subsec:Bartroff-Multiple-Wald}.
 
 We also present similar theorems for $pfdr$ and $pfnr$ control,
 and corollaries for application of it to SPRT and more general tests.
+
 ## THM: Finite Horizon Rejective $pfdr$ Control
 
 The finite horizon, rejective sequential step-down procedure described
@@ -123,7 +133,7 @@ $$
 ## THM: $pfdr$ and $pfnr$ Control for Infinite Horizon
 
 In the finite horizon, rejective procedure, the quantity $P\left(R>0\right)$
-is equivalent to 
+is equivalent to
 
 $$
 P\left(\exists i\in 1,...,m,\,t<T\,\text{ st }\,\Lambda^{i}\left(t\right)\geq A_{1}\right),
@@ -166,7 +176,6 @@ P_{H_{0}^{i}}(\exists t<\infty\text{ st }\Lambda^{i}(t)\leq B_{1},\forall t^{\pr
 =1-P_{H_{0}^{i}}(\exists t<\infty\,\text{ st }\,\Lambda^{i}(t)\geq A_{m},\,\forall t^{\prime}<t\,\Lambda^{i}(t^{\prime})>B_{1})\approx1-\alpha_{m}.
 $$
 
-
 Using this approximate equivalence and we may then achieve the following
 approximate bounds, subject to the conditions in Theorem \ref{thm:pfdr-infinite}:
 
@@ -195,7 +204,6 @@ $\forall i\leq m$:
 $$
 \exists i\in 1,...,m,\,\text{ st }\,\forall\theta\in H_{1}^{i}\quad P_{\theta}(\exists t<\infty\text{ st }\Lambda^{i}(t)\geq A_{1},\,\Lambda^{i}(t^{\prime})>B_{m}\quad\forall t^{\prime}<t)\geq\gamma_{1}
 $$
-
 
 $$
 \exists i\in 1,...,m,\,\text{ st }\,\forall\theta\in H_{0}^{i}\quad P_{\theta}(\exists t<\infty\text{ st }\Lambda^{i}(t)\leq B_{1},\,\Lambda^{i}(t^{\prime})<A_{m}\quad\forall t^{\prime}<t)\geq\gamma_{0}

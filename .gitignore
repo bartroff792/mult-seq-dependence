@@ -5,3 +5,5 @@ fix_ssh.sh
 CloudRunner/*
 docker_dev.sh
 .env
+Code/build/*
+QsForJay.md
