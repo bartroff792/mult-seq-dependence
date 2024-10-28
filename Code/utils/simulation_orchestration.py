@@ -115,8 +115,8 @@ def run_mc_synth_sim_tests(
 
 # TODO: move calc_llr_cutoffs to cutoff_funcs
 def calc_llr_cutoffs(
-    theta0: float,
-    theta1: float,
+    theta0: Optional[float],
+    theta1: Optional[float],
     extra_params: Dict[str, Any],
     hyp_type: Literal["pois", "binom", "drug", "norm_loc_known_var"],
     alpha: np.ndarray,
@@ -127,6 +127,7 @@ def calc_llr_cutoffs(
     fh_cutoff_imp_sample=False,
     fh_cutoff_imp_sample_prop=1.0,
     fh_cutoff_imp_sample_hedge: Optional[float] = None,
+    load_data: Optional[Dict[str, Any]] = None,
 ) -> Tuple[pd.DataFrame, int]:
     """Get the LLR cutoffs for a set of generating paramters.
 
@@ -143,25 +144,31 @@ def calc_llr_cutoffs(
         - The number of periods to run the simulation for. will just be an echo of the input if that
             was provided. Otherwise 1000 for FH and data dependent for Infinite horizon.
     """
-    params0, _ = data_funcs.construct_dgp(
-        m_null=len(alpha),
-        m_alt=0,
-        theta0=theta0,
-        theta1=theta1,
-        hyp_type=hyp_type,
-        extra_params=extra_params,
-        interleaved=False,
-    )
+    if ((theta0 is None) or (theta1 is None)) and (load_data is None):
+        raise ValueError("Theta0 and theta1 must be provided if load_data is not provided")
+    elif load_data is not None:
+        params0 = load_data["params0"]
+        params1 = load_data["params1"]
+    else:
+        params0, _ = data_funcs.construct_dgp(
+            m_null=len(alpha),
+            m_alt=0,
+            theta0=theta0,
+            theta1=theta1,
+            hyp_type=hyp_type,
+            extra_params=extra_params,
+            interleaved=False,
+        )
 
-    params1, _ = data_funcs.construct_dgp(
-        m_null=0,
-        m_alt=len(alpha),
-        theta0=theta0,
-        theta1=theta1,
-        hyp_type=hyp_type,
-        extra_params=extra_params,
-        interleaved=False,
-    )
+        params1, _ = data_funcs.construct_dgp(
+            m_null=0,
+            m_alt=len(alpha),
+            theta0=theta0,
+            theta1=theta1,
+            hyp_type=hyp_type,
+            extra_params=extra_params,
+            interleaved=False,
+        )
     if beta is not None:  # Infinite horizon
 
         # Use Wald approximations to get from alpha and beta to A and B
@@ -640,6 +647,7 @@ def single_sim(
         fh_cutoff_imp_sample=fh_cutoff_imp_sample,
         fh_cutoff_imp_sample_prop=fh_cutoff_imp_sample_prop,
         fh_cutoff_imp_sample_hedge=fh_cutoff_imp_sample_hedge,
+        load_data=load_data,
     )
     # TODO: add options for scaling style
 

@@ -5,7 +5,9 @@ This package serves two main purposes:
 * Can be used as a library to run sequential stepdown and sequential step-up tests on user provided data/data-streams.
 * Can be used to run a wide array simulations of applying the procedures to simple, synthetic data generating processes where the true parameter values are known.
 
-## Library
+## Package Structure
+
+### Library
 
 All major python modules are in the `Code/utils` dir.
 
@@ -13,7 +15,8 @@ All major python modules are in the `Code/utils` dir.
 * `multseq.py`: actual testing procedure
 * `data_funcs.py`: defines interfaces for streaming data.
 
-## Simulation
+### Simulation
+
 
 * `data_funcs.py`: Funcs for reading drug data, generating fake data, generating hypotheses, and computing llr paths.
 * `simulation_orchestration.py`: This module contains functions for higher level simulation for sequential testing of multiple hypotheses (beyond just generating the observations), and executing the SPRT procedures on it.
@@ -25,9 +28,43 @@ All major python modules are in the `Code/utils` dir.
 * `GoogleSearchHitData.csv`: a table of drugs search popularity, and the proportion of those searches that include "amnesia". The popularity and naming schemes of drugs differ, so some of these may be of higher than expected variance. Further, many drugs' search rates weren't available.
 * `YellowcardData.csv`: a bit too raw... contains number of total side effects, fatal side effects, amnesia reports, etc for each drug.
 
-## Demos
+## Usage
 
-To launch a simluation from the command line using the docker_main.py script...
+### Simulation
+
+To launch a simluation from the command line using the docker_main.py, and drop the results into a mysql database running at DBHOST, run something like the following:
+
+```
+python docker_main.py --alpha=0.1 --beta=0.05 --m_null=7 --m_alt=3 --hyp_type=binom --theta0=0.01 --theta1=0.05 --extra_params='n=3' --host=DBHOST --sim_reps=1000
+```
+
+### Library
+
+
+#### Cutoffs known
+
+If you already know the cutoffs and have the test statistics (be they log likelihood ratio or any other arbitrary statistic) packaged as either a pandas DataFrame or an online data stream (implementing the `utils.data_funcs.online_data` interface), then you can just pass them to the msprt function, and analyze the results:
+
+```
+utils.msprt(
+    statistics: pd.DataFrame,
+    cutoffs: cutoff_funcs.CutoffDF,
+    record_interval: int = 100,
+    stepup: bool = False,
+    rejective: bool = False,
+    verbose: bool = True,
+)
+```
+
+#### Cutoffs Unknown
+
+....WIP
+
+## In the weeds
+
+### Theory
+
+[Main Theorems](MainThms.md)
 
 ### BL scaling
 
@@ -51,6 +88,3 @@ $$
 
 when they're unknown.
 
-## Theory
-
-[Main Theorems](MainThms.md)

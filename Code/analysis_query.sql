@@ -15,11 +15,11 @@ with exec_stats as (
             fnp > 0
             or NULL
         ),3) as pfnr,
-        ROUND(STDDEV(fdp),3)  as var_fdr,
-        ROUND(STDDEV(fnp),3)  as var_fnr,
-        ROUND(STDDEV(avg_sample_number),3)  as var_asn,
+        ROUND(STDDEV(fdp),3) / count(*) as se_fdr,
+        ROUND(STDDEV(fnp),3)  / count(*)  as se_fnr,
+        ROUND(STDDEV(avg_sample_number),3) / count(*)  as se_asn,
         ROUND(avg(num_not_terminated),3)  as avg_num_not_terminated,
-        ROUND(STDDEV(num_not_terminated) ,3) as var_num_not_terminated
+        ROUND(STDDEV(num_not_terminated) ,3) / count(*) as se_num_not_terminated
     from
         simulation_results
     group by

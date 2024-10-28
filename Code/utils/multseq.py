@@ -166,7 +166,7 @@ class MSPRTOut:
 
 
 def msprt(
-    statistics: pd.DataFrame,
+    statistics: Union[pd.DataFrame, data_funcs.online_data],
     cutoffs: cutoff_funcs.CutoffDF,
     record_interval: int = 100,
     stepup: bool = False,

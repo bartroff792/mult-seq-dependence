@@ -216,7 +216,7 @@ def prescreen_rel(
 
 
 def gen_skew_prescreen(
-    min_am: int = 1, min_tot: int = 20, aug_am: int = 1, aug_non: int = 1
+    min_am: int = 1, min_tot: int = 20, aug_am: int = 1, aug_non: int = 1, max_inflation: float = 0.01
 ) -> ScreeningFuncType:
     """Generates a drug prescreening (and reaction count augmenting) function.
 
@@ -248,7 +248,9 @@ def gen_skew_prescreen(
             (reacts_df[am_col] > min_am) | (reacts_df[tot_col] > min_tot)
         ].copy()
         # Calculate the amnesia rate for each drug (augmenting by aug_am)
-        screened_df[TOTAL_AMNESIA_CNAME] = screened_df[TOTAL_AMNESIA_CNAME] + aug_am
+        am_aug_ser = pd.Series(aug_am, index=screened_df.index).astype(float)
+        am_aug_ser[am_aug_ser > (max_inflation * screened_df[TOTAL_REACTS_CNAME].astype(float))] = max_inflation * screened_df[TOTAL_REACTS_CNAME]
+        screened_df[TOTAL_AMNESIA_CNAME] = screened_df[TOTAL_AMNESIA_CNAME] + am_aug_ser
         # Calculate the total side effects rate for each drug (augmenting by aug_non + aug_am)
         screened_df[TOTAL_REACTS_CNAME] = (
             screened_df[TOTAL_REACTS_CNAME] + aug_am + aug_non
