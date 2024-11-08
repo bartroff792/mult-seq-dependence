@@ -141,3 +141,9 @@ $$
 
 when they're unknown.
 
+## Roadmap
+
+* Unittest support for stepup procedures accross all functionality
+* Fix infinite horizon pFDR-controlling cutoff estimation
+* Better abstract the cloud execution from the simulation execution
+* More example notebooks
