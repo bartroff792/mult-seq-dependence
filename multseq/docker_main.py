@@ -26,7 +26,7 @@ import os
 import pandas as pd
 import numpy as np
 import sqlalchemy
-from utils import simulation_orchestration
+from multseq.utils import simulation_orchestration
 import datetime
 import uuid
 import copy

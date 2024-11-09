@@ -1,9 +1,9 @@
-Code/secrets*.*
+multseq/secrets*.*
 fix_ssh.sh
 *.pyc
 .vscode/*
 CloudRunner/*
 docker_dev.sh
 .env
-Code/build/*
+multseq/build/*
 QsForJay.md

@@ -1,5 +1,7 @@
 """Funcs for reading drug data, generating fake data, generating hypotheses, and computing llr paths.
 
+WARNING: these functions are no longer quite right. In the process of being updated.
+
 List of all functions in this module:
 * Loading and screening drug data
     * gen_names: Generates a list of n_hyps unique names for hypotheses.

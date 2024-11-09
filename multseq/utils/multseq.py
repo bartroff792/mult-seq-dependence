@@ -22,7 +22,7 @@ import pandas as pd
 import logging
 from dataclasses import dataclass
 
-from . import cutoff_funcs, data_funcs
+from multseq.utils import cutoff_funcs, data_funcs
 
 logger = logging.getLogger()
 logger.setLevel(min((logging.WARNING, logger.level)))

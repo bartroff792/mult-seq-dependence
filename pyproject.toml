@@ -16,7 +16,6 @@ classifiers = [
     
 ]
 requires-python = "~=3.11"
-module = "Code"
 
 [tool.black]
 line-length = 99

@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 
 from tqdm import tqdm
-from . import data_funcs, cutoff_funcs, multseq
+from multseq.utils import data_funcs, cutoff_funcs, multseq
 import logging
 from dataclasses import dataclass
 
