@@ -20,4 +20,5 @@ matplotlib>=3.9.0
 notebook>=7.1.0
 pip
 python-dotenv>=1.0.0
+ipykernel
 -e .

@@ -7,6 +7,15 @@ This package serves two main purposes:
 * A library to run sequential step-down and sequential step-up tests on user provided data/data-streams.
 * A simulation environment for examining the behavior of these procedures under a variety of configurations and data generating processes.
 
+## Installation
+
+If you have Make installed:
+
+* `make create_environment` to create a conda environment
+* `conda activate multseq` to activate the environment
+* `make requirements` to install the dependencies and the package itself
+* `python -c "from multseq.utils import simulation_orchestration"` to verify the installation
+
 ## Package Structure
 
 ### Library
@@ -18,7 +27,6 @@ All major python modules are in the `Code/utils` dir.
 * `data_funcs.py`: defines interfaces for streaming data.
 
 ### Simulation
-
 
 * `data_funcs.py`: Functions for reading drug data, generating fake data, generating hypotheses, and computing llr paths.
 * `simulation_orchestration.py`: This module contains functions for higher level simulation for sequential testing of multiple hypotheses (beyond just generating the observations), and executing the SPRT procedures on it.
@@ -41,18 +49,15 @@ python docker_main.py --alpha=0.1 --beta=0.05 --m_null=7 --m_alt=3 --hyp_type=bi
 ```
 
 The simulation results are stored in three MySQL tables:
-- `simulation_metadata`: Tracks execution details like start time and number of repetitions
-- `simulation_params`: Records all simulation parameters (alpha, beta, hypothesis counts, etc.)
-- `simulation_results`: Stores results for each Monte Carlo iteration, including false discovery proportions, rejection counts, and sample numbers
-
+* `simulation_metadata`: Tracks execution details like start time and number of repetitions
+* `simulation_params`: Records all simulation parameters (alpha, beta, hypothesis counts, etc.)
+* `simulation_results`: Stores results for each Monte Carlo iteration, including false discovery proportions, rejection counts, and sample numbers
 
 ### Library
-
 
 This package handles both finite and infinite horizon testing. In the finite horizon case, type 1 error is directly controlled, and only rejective cutoffs are used. In the infinite horizon case, both type 1 and type 2 error are controlled, and cutoffs are used to both reject and accept hypotheses.
 
 The package currently only fully supports simple hypotheses. Using infinite horizon testing of simple hypotheses, we can employ Wald's approximation to choose log likelihood ratio cutoffs. However, for finite horizon testing, even of simple hypotheses, we must rely on simulations to choose the cutoffs.
-
 
 #### Running The Procedure
 
@@ -78,6 +83,7 @@ The first step is to decide on the basic structure of the error probabilities. T
 ```python
 alpha_vec = cutoff_funcs.construct_base_pvalue_cutoffs(cut_type, m_total, 1.0 / (10.0 * m_total))
 ```
+
 This will get you a vector of p-value cutoffs that are the same shape as the FDR level you've chosen, though they do NOT control FDR at that level under arbitrary dependence.
 
 ```python
@@ -91,6 +97,7 @@ alpha_vec = cutoff_funcs.apply_fdr_control_to_alpha_vec(
 This snippet will scale the p-value cutoffs to control FDR at the level specified by alpha.
 
 In the case of finite horizon testing, we can then use Wald's approximation to choose the log likelihood ratio cutoffs:
+
 ```python
 cutoff_df = cutoff_funcs.calculate_mult_sprt_cutoffs(alpha, beta)
 ```
@@ -111,6 +118,7 @@ A_vec = cutoff_funcs.estimate_finite_horizon_rejective_llr_cutoffs(
             imp_sample_prop=fh_cutoff_imp_sample_prop,
         )
 ```
+
 The first 3 arguments detail the null and alternative hypotheses; they're followed by the number of periods the FDR control level, the number of Monte Carlo repetitions used to estimate the cutoffs, and parameters that control importance sampling in that Monte Carlo estimation, used to ensure llr cutoffs for small p-values are not negative.
 
 ## In the weeds
